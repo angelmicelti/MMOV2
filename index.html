@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escáner QR Sincronizado - MMOV2</title>
+    
+    <!-- PWA -->
+    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkVzY2FuZXIgUVIgU2luY3Jvbml6YWRvIE1NT1YyIiwKICAic2hvcnRfbmFtZSI6ICJRUiBTY2FubmVyIiwKICAic3RhcnRfdXJsIjogIi9NTU9WMi8iLAogICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLAogICJiYWNrZ3JvdW5kX2NvbG9yIjogIiNmZmZmZmYiLAogICJ0aGVtZV9jb2xvciI6ICIjMGQ2ZWZkIgp9">
+    <meta name="theme-color" content="#0d6efd">
+    
+    <!-- Librería de escaneo QR -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #2c3e50;
+            font-size: 24px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-weight: 500;
+            color: #495057;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #reader {
+            width: 100%;
+            margin-bottom: 16px;
+            border-radius: 8px;
+            overflow: hidden;
+            min-height: 250px;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: #0d6efd;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #0b5ed7;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #bb2d3b;
+        }
+
+        .result {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 8px;
+            border-left: 4px solid #0d6efd;
+        }
+
+        .result.hidden {
+            display: none;
+        }
+
+        .result h3 {
+            margin-bottom: 12px;
+            color: #2c3e50;
+        }
+
+        .result p {
+            margin: 8px 0;
+            font-size: 15px;
+            word-break: break-word;
+        }
+
+        .count {
+            font-size: 24px;
+            font-weight: bold;
+            color: #0d6efd;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            color: #004085;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📷 Escáner QR MMOV2</h1>
+        
+        <div class="info-box">
+            <strong>ℹ️ Nota:</strong> Esta app usa una colección separada en Firebase para no interferir con otras aplicaciones.
+        </div>
+        
+        <div id="status" class="status">Pulsa "Iniciar cámara" para comenzar</div>
+        
+        <div id="reader"></div>
+        
+        <div class="buttons">
+            <button id="btnStart" class="btn btn-primary">📸 Iniciar cámara</button>
+            <button id="btnStop" class="btn btn-danger" disabled>⏹ Detener</button>
+        </div>
+        
+        <div id="result" class="result hidden">
+            <h3>Último escaneo</h3>
+            <p><strong>Contenido:</strong> <span id="qrContent">-</span></p>
+            <p><strong>Veces escaneado:</strong> <span id="qrCount" class="count">0</span></p>
+            <p><strong>Última vez:</strong> <span id="qrDate">-</span></p>
+        </div>
+    </div>
+
+    <script type="module">
+        // ============================================
+        // CONFIGURACIÓN FIREBASE
+        // ============================================
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, getDoc, runTransaction, onSnapshot } 
+            from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDLq-28-UdAJSqMJOFh5Xsj6UvPZ3HNA4w",
+            authDomain: "gestionreducciones.firebaseapp.com",
+            databaseURL: "https://gestionreducciones-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "gestionreducciones",
+            storageBucket: "gestionreducciones.firebasestorage.app",
+            messagingSenderId: "1057236051663",
+            appId: "1:1057236051663:web:10550d6a7851d8766fb9ba",
+            measurementId: "G-HND827Z5CW"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // ============================================
+        // NOMBRE DE COLECCIÓN ESPECÍFICO PARA ESTA APP
+        // ============================================
+        const COLLECTION_NAME = "MMOV2_qr_codes";
+
+        // ============================================
+        // VARIABLES GLOBALES
+        // ============================================
+        let html5QrcodeScanner = null;
+        let currentDocId = null;
+        let unsubscribe = null;
+
+        // ============================================
+        // ELEMENTOS DEL DOM
+        // ============================================
+        const btnStart = document.getElementById('btnStart');
+        const btnStop = document.getElementById('btnStop');
+        const statusEl = document.getElementById('status');
+        const resultEl = document.getElementById('result');
+        const qrContentEl = document.getElementById('qrContent');
+        const qrCountEl = document.getElementById('qrCount');
+        const qrDateEl = document.getElementById('qrDate');
+
+        // ============================================
+        // INICIALIZAR ESCÁNER
+        // ============================================
+        function initScanner() {
+            html5QrcodeScanner = new Html5QrcodeScanner(
+                "reader", 
+                { 
+                    fps: 10, 
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1.0
+                }, 
+                false
+            );
+        }
+
+        // ============================================
+        // ESCUCHAR CAMBIOS EN TIEMPO REAL
+        // ============================================
+        function listenToDocument(docId) {
+            if (unsubscribe) unsubscribe();
+            
+            const docRef = doc(db, COLLECTION_NAME, docId);
+            unsubscribe = onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    qrCountEl.textContent = data.veces_escaneado || 0;
+                    if (data.ultima_vez) {
+                        const fecha = data.ultima_vez.toDate();
+                        qrDateEl.textContent = fecha.toLocaleString('es-ES');
+                    }
+                }
+            });
+        }
+
+        // ============================================
+        // INCREMENTAR CONTADOR (TRANSACCIÓN SEGURA)
+        // ============================================
+        async function incrementCounter(decodedText) {
+            const docRef = doc(db, COLLECTION_NAME, decodedText);
+            
+            try {
+                const nuevoContador = await runTransaction(db, async (transaction) => {
+                    const snapshot = await transaction.get(docRef);
+                    let contadorActual = 0;
+                    
+                    if (snapshot.exists()) {
+                        contadorActual = snapshot.data().veces_escaneado || 0;
+                    }
+                    
+                    const nuevoValor = contadorActual + 1;
+                    transaction.set(docRef, {
+                        veces_escaneado: nuevoValor,
+                        ultima_vez: new Date(),
+                        contenido: decodedText,
+                        app: "MMOV2" // Marcador para identificar esta app
+                    });
+                    return nuevoValor;
+                });
+                
+                return nuevoContador;
+            } catch (error) {
+                console.error("Error en la transacción:", error);
+                statusEl.textContent = "❌ Error al guardar: " + error.message;
+                throw error;
+            }
+        }
+
+        // ============================================
+        // CALLBACK CUANDO SE DETECTA UN QR
+        // ============================================
+        async function onScanSuccess(decodedText, decodedResult) {
+            // Mostrar contenido
+            qrContentEl.textContent = decodedText;
+            resultEl.classList.remove('hidden');
+            statusEl.textContent = "✅ QR detectado. Actualizando contador...";
+            
+            // Guardar en Firebase
+            try {
+                await incrementCounter(decodedText);
+                statusEl.textContent = "✅ ¡Contador actualizado!";
+                
+                // Escuchar cambios en tiempo real
+                currentDocId = decodedText;
+                listenToDocument(decodedText);
+                
+                // Pausar brevemente para evitar lecturas repetidas
+                html5QrcodeScanner.pause(true);
+                setTimeout(() => {
+                    if (html5QrcodeScanner) {
+                        html5QrcodeScanner.resume();
+                    }
+                }, 2000);
+                
+            } catch (error) {
+                statusEl.textContent = "❌ Error al actualizar";
+            }
+        }
+
+        // ============================================
+        // EVENTOS DE LOS BOTONES
+        // ============================================
+        btnStart.addEventListener('click', async () => {
+            initScanner();
+            
+            html5QrcodeScanner.start(
+                { facingMode: "environment" }, // Cámara trasera
+                { fps: 10, qrbox: 250 },
+                onScanSuccess,
+                (errorMessage) => {
+                    // Errores de escaneo (se ignoran, sigue buscando)
+                }
+            ).then(() => {
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+                statusEl.textContent = "📷 Apunta la cámara a un código QR";
+            }).catch(err => {
+                statusEl.textContent = "❌ Error al iniciar cámara: " + err;
+                console.error(err);
+            });
+        });
+
+        btnStop.addEventListener('click', () => {
+            if (html5QrcodeScanner) {
+                html5QrcodeScanner.stop().then(() => {
+                    btnStart.disabled = false;
+                    btnStop.disabled = true;
+                    statusEl.textContent = "⏹ Cámara detenida";
+                    if (unsubscribe) {
+                        unsubscribe();
+                        unsubscribe = null;
+                    }
+                }).catch(err => {
+                    console.error(err);
+                });
+            }
+        });
+
+        // ============================================
+        // INICIALIZACIÓN
+        // ============================================
+        console.log("App MMOV2 QR Scanner inicializada");
+        console.log("Usando colección:", COLLECTION_NAME);
+    </script>
+</body>
+</html>
