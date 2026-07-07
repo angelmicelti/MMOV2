@@ -5,11 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Escáner QR Sincronizado - MMOV2</title>
     
-    <!-- PWA -->
-    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkVzY2FuZXIgUVIgU2luY3Jvbml6YWRvIE1NT1YyIiwKICAic2hvcnRfbmFtZSI6ICJRUiBTY2FubmVyIiwKICAic3RhcnRfdXJsIjogIi9NTU9WMi8iLAogICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLAogICJiYWNrZ3JvdW5kX2NvbG9yIjogIiNmZmZmZmYiLAogICJ0aGVtZV9jb2xvciI6ICIjMGQ2ZWZkIgp9">
     <meta name="theme-color" content="#0d6efd">
     
-    <!-- Librería de escaneo QR -->
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     
     <style>
@@ -57,12 +54,28 @@
             justify-content: center;
         }
 
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
         #reader {
             width: 100%;
             margin-bottom: 16px;
             border-radius: 8px;
             overflow: hidden;
             min-height: 250px;
+            background: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .buttons {
@@ -142,6 +155,30 @@
             font-size: 14px;
             color: #004085;
         }
+
+        .debug-info {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 16px;
+            font-size: 12px;
+            color: #856404;
+            display: none;
+        }
+
+        .debug-info.show {
+            display: block;
+        }
+
+        .camera-select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -149,10 +186,14 @@
         <h1>📷 Escáner QR MMOV2</h1>
         
         <div class="info-box">
-            <strong>ℹ️ Nota:</strong> Esta app usa una colección separada en Firebase para no interferir con otras aplicaciones.
+            <strong>ℹ️ Nota:</strong> Asegúrate de permitir el acceso a la cámara cuando el navegador lo solicite.
         </div>
         
         <div id="status" class="status">Pulsa "Iniciar cámara" para comenzar</div>
+        
+        <select id="cameraSelect" class="camera-select" style="display: none;">
+            <option value="">Selecciona una cámara</option>
+        </select>
         
         <div id="reader"></div>
         
@@ -166,6 +207,11 @@
             <p><strong>Contenido:</strong> <span id="qrContent">-</span></p>
             <p><strong>Veces escaneado:</strong> <span id="qrCount" class="count">0</span></p>
             <p><strong>Última vez:</strong> <span id="qrDate">-</span></p>
+        </div>
+        
+        <div id="debugInfo" class="debug-info">
+            <strong>🔧 Información de depuración:</strong><br>
+            <span id="debugText"></span>
         </div>
     </div>
 
@@ -191,9 +237,6 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // ============================================
-        // NOMBRE DE COLECCIÓN ESPECÍFICO PARA ESTA APP
-        // ============================================
         const COLLECTION_NAME = "MMOV2_qr_codes";
 
         // ============================================
@@ -202,6 +245,7 @@
         let html5QrcodeScanner = null;
         let currentDocId = null;
         let unsubscribe = null;
+        let availableCameras = [];
 
         // ============================================
         // ELEMENTOS DEL DOM
@@ -213,19 +257,129 @@
         const qrContentEl = document.getElementById('qrContent');
         const qrCountEl = document.getElementById('qrCount');
         const qrDateEl = document.getElementById('qrDate');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const debugInfo = document.getElementById('debugInfo');
+        const debugText = document.getElementById('debugText');
+
+        // ============================================
+        // FUNCIONES DE DIAGNÓSTICO
+        // ============================================
+        function showDebug(message) {
+            debugText.innerHTML += message + '<br>';
+            debugInfo.classList.add('show');
+            console.log(message);
+        }
+
+        function setStatus(message, type = 'normal') {
+            statusEl.textContent = message;
+            statusEl.className = 'status';
+            if (type === 'error') statusEl.classList.add('error');
+            if (type === 'success') statusEl.classList.add('success');
+        }
+
+        // ============================================
+        // VERIFICAR COMPATIBILIDAD
+        // ============================================
+        async function checkCompatibility() {
+            showDebug('🔍 Verificando compatibilidad del navegador...');
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Tu navegador no soporta acceso a la cámara. Usa Chrome, Firefox o Safari actualizado.');
+            }
+            
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                throw new Error('La cámara requiere HTTPS. Asegúrate de que la URL empieza con https://');
+            }
+            
+            showDebug('✅ Navegador compatible');
+            showDebug('📍 Protocolo: ' + location.protocol);
+            showDebug('🌐 Host: ' + location.hostname);
+        }
+
+        // ============================================
+        // LISTAR CÁMARAS DISPONIBLES
+        // ============================================
+        async function listCameras() {
+            try {
+                showDebug('📷 Buscando cámaras disponibles...');
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                availableCameras = devices.filter(device => device.kind === 'videoinput');
+                
+                showDebug(`✅ Encontradas ${availableCameras.length} cámara(s)`);
+                
+                if (availableCameras.length === 0) {
+                    throw new Error('No se encontraron cámaras en este dispositivo');
+                }
+                
+                // Mostrar selector si hay múltiples cámaras
+                if (availableCameras.length > 1) {
+                    cameraSelect.innerHTML = '<option value="">Selecciona una cámara</option>';
+                    availableCameras.forEach((camera, index) => {
+                        const label = camera.label || `Cámara ${index + 1}`;
+                        const option = document.createElement('option');
+                        option.value = camera.deviceId;
+                        option.textContent = label;
+                        cameraSelect.appendChild(option);
+                    });
+                    cameraSelect.style.display = 'block';
+                }
+                
+                return availableCameras;
+            } catch (error) {
+                showDebug('❌ Error al listar cámaras: ' + error.message);
+                throw error;
+            }
+        }
+
+        // ============================================
+        // SOLICITAR PERMISOS
+        // ============================================
+        async function requestCameraPermission() {
+            try {
+                showDebug('🔐 Solicitando permisos de cámara...');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'environment' 
+                    } 
+                });
+                
+                showDebug('✅ Permisos concedidos');
+                
+                // Detener el stream temporal
+                stream.getTracks().forEach(track => track.stop());
+                
+                return true;
+            } catch (error) {
+                showDebug('❌ Error al solicitar permisos: ' + error.name + ' - ' + error.message);
+                
+                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    throw new Error('Permiso de cámara denegado. Por favor, permite el acceso a la cámara en la configuración del navegador.');
+                } else if (error.name === 'NotFoundError') {
+                    throw new Error('No se encontró ninguna cámara en este dispositivo.');
+                } else if (error.name === 'NotReadableError') {
+                    throw new Error('La cámara está siendo usada por otra aplicación. Cierra otras apps que puedan estar usándola.');
+                }
+                
+                throw error;
+            }
+        }
 
         // ============================================
         // INICIALIZAR ESCÁNER
         // ============================================
-        function initScanner() {
-            html5QrcodeScanner = new Html5QrcodeScanner(
-                "reader", 
-                { 
-                    fps: 10, 
-                    qrbox: { width: 250, height: 250 },
-                    aspectRatio: 1.0
-                }, 
-                false
+        function initScanner(cameraId = null) {
+            html5QrcodeScanner = new Html5Qrcode(
+                "reader",
+                {
+                    formatsToSupport: [
+                        Html5QrcodeSupportedFormats.QR_CODE,
+                        Html5QrcodeSupportedFormats.DATA_MATRIX,
+                        Html5QrcodeSupportedFormats.AZTEC
+                    ],
+                    verbose: false
+                }
             );
         }
 
@@ -249,7 +403,7 @@
         }
 
         // ============================================
-        // INCREMENTAR CONTADOR (TRANSACCIÓN SEGURA)
+        // INCREMENTAR CONTADOR
         // ============================================
         async function incrementCounter(decodedText) {
             const docRef = doc(db, COLLECTION_NAME, decodedText);
@@ -268,7 +422,7 @@
                         veces_escaneado: nuevoValor,
                         ultima_vez: new Date(),
                         contenido: decodedText,
-                        app: "MMOV2" // Marcador para identificar esta app
+                        app: "MMOV2"
                     });
                     return nuevoValor;
                 });
@@ -276,7 +430,7 @@
                 return nuevoContador;
             } catch (error) {
                 console.error("Error en la transacción:", error);
-                statusEl.textContent = "❌ Error al guardar: " + error.message;
+                setStatus("❌ Error al guardar: " + error.message, 'error');
                 throw error;
             }
         }
@@ -285,22 +439,19 @@
         // CALLBACK CUANDO SE DETECTA UN QR
         // ============================================
         async function onScanSuccess(decodedText, decodedResult) {
-            // Mostrar contenido
             qrContentEl.textContent = decodedText;
             resultEl.classList.remove('hidden');
-            statusEl.textContent = "✅ QR detectado. Actualizando contador...";
+            setStatus("✅ QR detectado. Actualizando contador...", 'success');
             
-            // Guardar en Firebase
             try {
                 await incrementCounter(decodedText);
-                statusEl.textContent = "✅ ¡Contador actualizado!";
+                setStatus("✅ ¡Contador actualizado!", 'success');
                 
-                // Escuchar cambios en tiempo real
                 currentDocId = decodedText;
                 listenToDocument(decodedText);
                 
-                // Pausar brevemente para evitar lecturas repetidas
-                html5QrcodeScanner.pause(true);
+                // Pausar brevemente
+                html5QrcodeScanner.pause();
                 setTimeout(() => {
                     if (html5QrcodeScanner) {
                         html5QrcodeScanner.resume();
@@ -308,45 +459,92 @@
                 }, 2000);
                 
             } catch (error) {
-                statusEl.textContent = "❌ Error al actualizar";
+                setStatus("❌ Error al actualizar", 'error');
+            }
+        }
+
+        // ============================================
+        // INICIAR ESCÁNER
+        // ============================================
+        async function startScanner() {
+            try {
+                // Limpiar debug
+                debugText.innerHTML = '';
+                
+                // Verificar compatibilidad
+                await checkCompatibility();
+                
+                // Solicitar permisos primero
+                await requestCameraPermission();
+                
+                // Listar cámaras
+                await listCameras();
+                
+                // Inicializar escáner
+                initScanner();
+                
+                setStatus("🔄 Iniciando cámara...");
+                
+                // Configuración para móviles
+                const config = {
+                    fps: 10,
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1.0,
+                    disableFlip: false
+                };
+                
+                // Determinar qué cámara usar
+                let cameraConfig;
+                const selectedCameraId = cameraSelect.value;
+                
+                if (selectedCameraId) {
+                    cameraConfig = { deviceId: { exact: selectedCameraId } };
+                    showDebug('📷 Usando cámara seleccionada: ' + selectedCameraId);
+                } else {
+                    cameraConfig = { facingMode: { exact: 'environment' } };
+                    showDebug('📷 Usando cámara trasera por defecto');
+                }
+                
+                // Iniciar escaneo
+                await html5QrcodeScanner.start(
+                    cameraConfig,
+                    config,
+                    onScanSuccess,
+                    (errorMessage) => {
+                        // Errores de escaneo (se ignoran)
+                    }
+                );
+                
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+                setStatus("📷 Apunta la cámara a un código QR", 'success');
+                
+            } catch (error) {
+                console.error('Error al iniciar cámara:', error);
+                setStatus("❌ " + error.message, 'error');
+                showDebug('❌ Error completo: ' + error.stack);
             }
         }
 
         // ============================================
         // EVENTOS DE LOS BOTONES
         // ============================================
-        btnStart.addEventListener('click', async () => {
-            initScanner();
-            
-            html5QrcodeScanner.start(
-                { facingMode: "environment" }, // Cámara trasera
-                { fps: 10, qrbox: 250 },
-                onScanSuccess,
-                (errorMessage) => {
-                    // Errores de escaneo (se ignoran, sigue buscando)
-                }
-            ).then(() => {
-                btnStart.disabled = true;
-                btnStop.disabled = false;
-                statusEl.textContent = "📷 Apunta la cámara a un código QR";
-            }).catch(err => {
-                statusEl.textContent = "❌ Error al iniciar cámara: " + err;
-                console.error(err);
-            });
-        });
+        btnStart.addEventListener('click', startScanner);
 
         btnStop.addEventListener('click', () => {
             if (html5QrcodeScanner) {
                 html5QrcodeScanner.stop().then(() => {
+                    html5QrcodeScanner.clear();
                     btnStart.disabled = false;
                     btnStop.disabled = true;
-                    statusEl.textContent = "⏹ Cámara detenida";
+                    setStatus("⏹ Cámara detenida");
                     if (unsubscribe) {
                         unsubscribe();
                         unsubscribe = null;
                     }
                 }).catch(err => {
                     console.error(err);
+                    setStatus("❌ Error al detener: " + err.message, 'error');
                 });
             }
         });
