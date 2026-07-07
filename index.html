@@ -487,6 +487,11 @@
                     } else if (!currentAppUser) {
                         showLoginScreen();
                     }
+                } else if (!currentAppUser && allUsers.length > 0) {
+                    // Si se acaba de crear el primer usuario, forzar vista de login
+                    if (!document.getElementById('form-setup').classList.contains('hidden')) {
+                        showLoginScreen();
+                    }
                 } else if (currentAppUser) {
                     // Refrescar permisos por si se actualizó el rol en caliente
                     const myProfile = allUsers.find(u => u.id === currentAppUser.id);
@@ -563,7 +568,14 @@
                 const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users');
                 await addDoc(usersRef, { name, username, password, role: 'admin', tutorGroup: '' });
                 showToast("Administrador creado. Iniciando sesión...");
-                // setupRealtimeListeners will catch this and render login or auto-login
+                
+                // Cambiar a la pantalla de login, rellenar y acceder automáticamente
+                setTimeout(() => {
+                    showLoginScreen();
+                    document.getElementById('login-username').value = username;
+                    document.getElementById('login-password').value = password;
+                    processLogin();
+                }, 1000);
             } catch (e) {
                 console.error(e);
                 showToast("Error creando usuario.");
