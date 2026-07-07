@@ -447,9 +447,8 @@
             if (tabId === 'scanner') {
                 if(!isScanningActive && !currentScannedStudent) window.startScanner();
             } else {
-                if (html5QrcodeScanner) {
-                    try { html5QrcodeScanner.pause(true); } catch(e){} 
-                }
+                // Apagar la cámara completamente al salir de la pestaña
+                stopScannerVisually();
             }
 
             if (tabId === 'students') renderStudentsList();
@@ -464,23 +463,30 @@
 
         window.startScanner = () => {
             if (!html5QrcodeScanner) return;
+            
             document.getElementById('restart-scanner-btn').classList.add('hidden');
-            isScanningActive = true;
             
             const config = { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
             
             html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
+                .then(() => {
+                    isScanningActive = true;
+                })
                 .catch(err => {
                     console.error("Error starting camera", err);
                     showToast("No se pudo iniciar la cámara. Revisa los permisos.");
+                    document.getElementById('restart-scanner-btn').classList.remove('hidden');
                 });
         };
 
         function stopScannerVisually() {
-            if(html5QrcodeScanner && html5QrcodeScanner.isScanning) {
-                html5QrcodeScanner.stop().then(() => {
-                    document.getElementById('restart-scanner-btn').classList.remove('hidden');
-                }).catch(err => console.log(err));
+            if(html5QrcodeScanner && isScanningActive) {
+                try {
+                    html5QrcodeScanner.stop().then(() => {
+                        document.getElementById('restart-scanner-btn').classList.remove('hidden');
+                        isScanningActive = false;
+                    }).catch(err => console.log("Error deteniendo cámara", err));
+                } catch(e) {}
             }
         }
 
@@ -490,7 +496,6 @@
             const student = allStudents.find(s => s.id === decodedText);
             
             if (student) {
-                isScanningActive = false;
                 stopScannerVisually();
                 triggerActionView(student);
                 navigator.vibrate && navigator.vibrate(200); 
