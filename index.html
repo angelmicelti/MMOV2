@@ -220,7 +220,10 @@
         <section id="view-reports" class="view-section hidden">
             <div class="max-w-xl mx-auto mt-2 space-y-4">
                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                    <h2 class="font-bold text-gray-700 mb-3"><i class="fa-solid fa-chart-pie text-blue-500"></i> Filtros de Informe</h2>
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="font-bold text-gray-700"><i class="fa-solid fa-chart-pie text-blue-500"></i> Filtros de Informe</h2>
+                        <button onclick="confirmDeleteLogs()" class="text-xs bg-red-50 text-red-600 px-3 py-1 rounded-md font-semibold hover:bg-red-100 transition-colors"><i class="fa-solid fa-trash-can"></i> Borrar Registros</button>
+                    </div>
                     <div class="grid grid-cols-2 gap-3">
                         <select id="report-time" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
                             <option value="today">Hoy</option>
@@ -337,6 +340,7 @@
         let currentUser = null;
         let allStudents = [];
         let allLogs = [];
+        window.currentFilteredLogs = []; // Global para borrado contextual
         let html5QrcodeScanner = null;
         let isScanningActive = true;
         let currentScannedStudent = null;
@@ -443,7 +447,6 @@
             if (tabId === 'scanner') {
                 if(!isScanningActive && !currentScannedStudent) window.startScanner();
             } else {
-                // Apagar la cámara completamente al salir de la pestaña
                 stopScannerVisually();
             }
 
@@ -837,6 +840,42 @@
             });
         };
 
+        // ELIMINACIÓN DE REGISTROS (LOGS)
+        window.confirmDeleteLogs = () => {
+            if (!window.currentFilteredLogs || window.currentFilteredLogs.length === 0) {
+                return showToast("No hay registros para eliminar con estos filtros.");
+            }
+            const count = window.currentFilteredLogs.length;
+            window.showConfirmModal('Borrar Registros', `¿Eliminar permanentemente los ${count} registros mostrados actualmente?`, async () => {
+                try {
+                    for (const l of window.currentFilteredLogs) {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs', l.id));
+                    }
+                    showToast(`${count} registros eliminados con éxito.`);
+                } catch (error) {
+                    console.error("Error al eliminar registros:", error);
+                    showToast("Error al eliminar registros.");
+                }
+            });
+        };
+
+        window.confirmDeleteStudentLogs = (studentId, studentName) => {
+            const logsToDelete = window.currentFilteredLogs.filter(l => l.studentId === studentId);
+            if (logsToDelete.length === 0) return;
+            const count = logsToDelete.length;
+            window.showConfirmModal('Borrar Registros Alumno', `¿Eliminar los ${count} registros visibles de ${studentName}?`, async () => {
+                try {
+                    for (const l of logsToDelete) {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs', l.id));
+                    }
+                    showToast(`Registros de ${studentName} eliminados.`);
+                } catch (error) {
+                    console.error("Error al eliminar registros del alumno:", error);
+                    showToast("Error al eliminar registros.");
+                }
+            });
+        };
+
         // ================= INFORMES Y ESTADÍSTICAS =================
         window.generateReport = () => {
             const timeFilter = document.getElementById('report-time').value;
@@ -860,6 +899,9 @@
             if (groupFilter !== 'ALL') {
                 filteredLogs = filteredLogs.filter(l => l.course === groupFilter);
             }
+
+            // Guardar globalmente para poder eliminarlos luego de forma contextual
+            window.currentFilteredLogs = filteredLogs;
 
             let totalRequested = filteredLogs.filter(l => l.requested).length;
             let totalAuth = filteredLogs.filter(l => l.authorized).length;
@@ -889,9 +931,11 @@
             } else {
                 emptyMsg.classList.add('hidden');
                 
-                const sortedStats = studentKeys.map(k => statsByStudent[k]).sort((a, b) => b.auth - a.auth);
+                // Mapear incluyendo el ID del estudiante para poder borrar individualmente
+                const sortedStats = studentKeys.map(k => ({ id: k, ...statsByStudent[k] })).sort((a, b) => b.auth - a.auth);
                 
                 sortedStats.forEach(stat => {
+                    const safeName = stat.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
                     let alertClass = "";
                     if (stat.auth >= 3 && timeFilter === 'today') alertClass = "text-red-600 font-bold";
                     
@@ -901,8 +945,11 @@
                                 <span class="block font-medium text-gray-800 ${alertClass}">${stat.name}</span>
                                 <span class="block text-[10px] text-gray-400">${stat.course}</span>
                             </td>
-                            <td class="p-3 text-center">
-                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold">${stat.auth} / ${stat.req}</span>
+                            <td class="p-3 text-right whitespace-nowrap">
+                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold mr-2">${stat.auth} / ${stat.req}</span>
+                                <button onclick="confirmDeleteStudentLogs('${stat.id}', '${safeName}')" class="text-red-400 hover:text-red-600 p-1 transition-colors" title="Borrar registros de este alumno">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
                             </td>
                         </tr>
                     `;
