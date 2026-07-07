@@ -77,15 +77,6 @@
         .alert-lvl-3 { animation: pulse-level-3 0.5s infinite; }
         .alert-lvl-extreme { animation: pulse-level-extreme 0.25s infinite; }
 
-        /* Toggle Switch (iOS style) */
-        .toggle-checkbox:checked {
-            right: 0;
-            border-color: #3b82f6;
-        }
-        .toggle-checkbox:checked + .toggle-label {
-            background-color: #3b82f6;
-        }
-        
         /* Ocultar secciones no activas */
         .view-section { display: none; }
         .view-section.active { display: block; }
@@ -159,10 +150,10 @@
                         <div>
                             <p class="font-semibold text-gray-700">¿Solicita ir al servicio?</p>
                         </div>
-                        <div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
-                            <input type="checkbox" id="toggle-request" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 z-10 top-0 left-0" checked onchange="toggleAuthVisibility()"/>
-                            <label for="toggle-request" class="toggle-label block overflow-hidden h-6 rounded-full bg-blue-500 cursor-pointer transition-colors duration-300"></label>
-                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="toggle-request" class="sr-only peer" checked onchange="toggleAuthVisibility()">
+                            <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
                     </div>
 
                     <!-- Pregunta 2 (Condicional) -->
@@ -170,10 +161,10 @@
                         <div>
                             <p class="font-semibold text-gray-700">¿Autoriza a ir?</p>
                         </div>
-                        <div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
-                            <input type="checkbox" id="toggle-auth" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 z-10 top-0 left-0" checked/>
-                            <label for="toggle-auth" class="toggle-label block overflow-hidden h-6 rounded-full bg-blue-500 cursor-pointer transition-colors duration-300"></label>
-                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="toggle-auth" class="sr-only peer" checked>
+                            <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
                     </div>
                 </div>
 
@@ -311,7 +302,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ================= CONFIGURACIÓN FIREBASE =================
         const userFirebaseConfig = {
@@ -357,14 +348,12 @@
                 console.error("Error Auth detallado:", error);
                 hideLoading();
                 
-                // Mostrar error exacto para debugging
                 if (error.code === 'auth/unauthorized-domain') {
-                    showToast("Error Firebase: Añade tu dominio (github.io) en 'Authorized Domains'");
+                    showToast("Error Firebase: Añade tu dominio en 'Authorized Domains'");
                 } else {
                     showToast("Fallo de conexión: " + (error.code || error.message).substring(0, 40));
                 }
                 
-                // Forzar inicio de la interfaz de la cámara aunque falle Firebase
                 if (!isAppInitialized) {
                     isAppInitialized = true;
                     initScanner(); 
@@ -389,7 +378,6 @@
             }
         });
 
-        // Failsafe: Quitar pantalla de carga tras 5 segundos forzosamente
         setTimeout(() => {
             const overlay = document.getElementById('loading-overlay');
             if(overlay && overlay.style.display !== 'none') {
@@ -406,7 +394,6 @@
         function setupRealtimeListeners() {
             if (!currentUser) return;
 
-            // Colección Estudiantes
             const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students');
             onSnapshot(studentsRef, (snapshot) => {
                 allStudents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -416,7 +403,6 @@
                 }
             }, (error) => console.error("Error loading students:", error));
 
-            // Colección Logs
             const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs');
             onSnapshot(logsRef, (snapshot) => {
                 allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -500,9 +486,7 @@
             }
         }
 
-        function onScanFailure(error) {
-            // Ignorado, ocurre cuando la cámara no detecta QR en el fotograma actual
-        }
+        function onScanFailure(error) {}
 
         // ================= VISTA DE ACCIÓN (EL PISAPORTE) =================
         function triggerActionView(student) {
