@@ -76,10 +76,6 @@
         .alert-lvl-2 { animation: pulse-level-2 1s infinite; }
         .alert-lvl-3 { animation: pulse-level-3 0.5s infinite; }
         .alert-lvl-extreme { animation: pulse-level-extreme 0.25s infinite; }
-
-        /* Ocultar secciones no activas */
-        .view-section { display: none; }
-        .view-section.active { display: block; }
         
         /* Impresión de carnets */
         @media print {
@@ -111,7 +107,7 @@
     <main class="flex-1 overflow-y-auto no-scrollbar p-4 pb-24 no-print relative">
         
         <!-- ================= VISTA: ESCÁNER ================= -->
-        <section id="view-scanner" class="view-section active h-full flex flex-col">
+        <section id="view-scanner" class="view-section h-full flex flex-col">
             <div class="text-center mb-4">
                 <h2 class="text-lg font-bold text-gray-700">Control de Accesos</h2>
                 <p class="text-sm text-gray-500">Enfoca el carnet del alumno para registrar la salida.</p>
@@ -125,7 +121,7 @@
         </section>
 
         <!-- ================= VISTA: ACCIÓN (TRAS ESCANEAR) ================= -->
-        <section id="view-action" class="view-section">
+        <section id="view-action" class="view-section hidden">
             <div class="bg-white rounded-xl shadow-lg p-6 max-w-md mx-auto mt-4">
                 <button onclick="cancelAction()" class="text-gray-400 hover:text-gray-600 mb-4">
                     <i class="fa-solid fa-arrow-left"></i> Cancelar
@@ -176,7 +172,7 @@
         </section>
 
         <!-- ================= VISTA: ALUMNADO ================= -->
-        <section id="view-students" class="view-section">
+        <section id="view-students" class="view-section hidden">
             <div class="max-w-xl mx-auto space-y-6 mt-2">
                 
                 <!-- Importar Caja -->
@@ -221,7 +217,7 @@
         </section>
 
         <!-- ================= VISTA: INFORMES ================= -->
-        <section id="view-reports" class="view-section">
+        <section id="view-reports" class="view-section hidden">
             <div class="max-w-xl mx-auto mt-2 space-y-4">
                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <h2 class="font-bold text-gray-700 mb-3"><i class="fa-solid fa-chart-pie text-blue-500"></i> Filtros de Informe</h2>
@@ -413,7 +409,7 @@
             onSnapshot(studentsRef, (snapshot) => {
                 allStudents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 updateGroupSelectors();
-                if (document.getElementById('view-students').classList.contains('active')) {
+                if (!document.getElementById('view-students').classList.contains('hidden')) {
                     renderStudentsList();
                 }
             }, (error) => console.error("Error loading students:", error));
@@ -421,7 +417,7 @@
             const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs');
             onSnapshot(logsRef, (snapshot) => {
                 allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                if (document.getElementById('view-reports').classList.contains('active')) {
+                if (!document.getElementById('view-reports').classList.contains('hidden')) {
                     generateReport();
                 }
             }, (error) => console.error("Error loading logs:", error));
@@ -429,7 +425,7 @@
 
         // ================= CONTROL DE VISTAS (TABS) =================
         window.switchTab = (tabId) => {
-            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
             const tabs = ['scanner', 'students', 'reports'];
             tabs.forEach(t => {
                 document.getElementById(`tab-${t}`).classList.remove('text-blue-600');
@@ -438,7 +434,7 @@
                 document.getElementById(`tab-${t}`).querySelector('span').classList.remove('font-bold');
             });
 
-            document.getElementById(`view-${tabId}`).classList.add('active');
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
             document.getElementById(`tab-${tabId}`).classList.remove('text-gray-400');
             document.getElementById(`tab-${tabId}`).classList.add('text-blue-600');
             document.getElementById(`tab-bg-${tabId}`).classList.add('bg-blue-50');
@@ -512,8 +508,8 @@
         function triggerActionView(student) {
             currentScannedStudent = student;
             
-            document.getElementById('view-scanner').classList.remove('active');
-            document.getElementById('view-action').classList.add('active');
+            document.getElementById('view-scanner').classList.add('hidden');
+            document.getElementById('view-action').classList.remove('hidden');
             
             document.getElementById('action-student-name').textContent = student.name;
             document.getElementById('action-course').textContent = student.course;
@@ -573,8 +569,8 @@
 
         window.cancelAction = () => {
             currentScannedStudent = null;
-            document.getElementById('view-action').classList.remove('active');
-            document.getElementById('view-scanner').classList.add('active');
+            document.getElementById('view-action').classList.add('hidden');
+            document.getElementById('view-scanner').classList.remove('hidden');
             window.startScanner();
         };
 
