@@ -126,6 +126,23 @@
                         <button onclick="processLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow transition-colors mt-2">
                             Entrar
                         </button>
+                        <button onclick="showRegisterScreen()" class="w-full bg-gray-100 hover:bg-gray-200 text-blue-600 font-bold py-3 rounded-xl shadow transition-colors mt-2 border border-gray-200">
+                            Registrarse
+                        </button>
+                    </div>
+
+                    <!-- Formulario de Registro (Autoregistro) -->
+                    <div id="form-register" class="space-y-4 hidden">
+                        <input type="text" id="reg-name" placeholder="Nombre completo" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
+                        <input type="text" id="reg-username" placeholder="Usuario de acceso" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
+                        <input type="password" id="reg-password" placeholder="Contraseña" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
+                        <input type="password" id="reg-password-confirm" placeholder="Repetir contraseña" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
+                        <button onclick="processRegister()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow transition-colors mt-2">
+                            Crear Cuenta
+                        </button>
+                        <button onclick="showLoginScreen()" class="w-full bg-transparent hover:bg-gray-50 text-gray-500 font-bold py-2 rounded-xl transition-colors mt-2">
+                            Volver al Login
+                        </button>
                     </div>
 
                     <!-- Formulario de Creación Súper Admin (Solo si no hay usuarios) -->
@@ -133,6 +150,7 @@
                         <input type="text" id="setup-name" placeholder="Nombre completo" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
                         <input type="text" id="setup-username" placeholder="Usuario de acceso" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
                         <input type="password" id="setup-password" placeholder="Contraseña" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
+                        <input type="password" id="setup-password-confirm" placeholder="Repetir contraseña" class="w-full border border-gray-300 rounded-xl p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
                         <button onclick="createInitialAdmin()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl shadow transition-colors mt-2">
                             Crear Administrador
                         </button>
@@ -372,6 +390,7 @@
                 <input type="text" id="modal-user-name" placeholder="Nombre completo" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                 <input type="text" id="modal-user-username" placeholder="Usuario de acceso" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                 <input type="password" id="modal-user-password" placeholder="Contraseña" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <input type="password" id="modal-user-password-confirm" placeholder="Repetir contraseña" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
                 <select id="modal-user-role" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" onchange="toggleTutorGroupInput()">
                     <option value="profesor">Profesor (Solo usar app)</option>
                     <option value="tutor">Tutor (Puede ver/imprimir su grupo)</option>
@@ -541,6 +560,7 @@
             document.getElementById('login-subtitle').textContent = "Crea el usuario administrador";
             
             document.getElementById('form-login').classList.add('hidden');
+            document.getElementById('form-register').classList.add('hidden');
             document.getElementById('form-setup').classList.remove('hidden');
         }
 
@@ -554,19 +574,38 @@
             document.getElementById('login-title').textContent = "Iniciar Sesión";
             document.getElementById('login-subtitle').textContent = "Introduce tus credenciales";
             
-            document.getElementById('form-login').classList.remove('hidden');
             document.getElementById('form-setup').classList.add('hidden');
+            document.getElementById('form-register').classList.add('hidden');
+            document.getElementById('form-login').classList.remove('hidden');
             
             // Apagar escáner por si acaso
             stopScannerVisually();
         }
 
+        window.showRegisterScreen = () => {
+            document.getElementById('login-title').textContent = "Registro";
+            document.getElementById('login-subtitle').textContent = "Crea tu cuenta de profesor";
+            
+            document.getElementById('form-login').classList.add('hidden');
+            document.getElementById('form-setup').classList.add('hidden');
+            document.getElementById('form-register').classList.remove('hidden');
+            
+            // Limpiar campos
+            document.getElementById('reg-name').value = '';
+            document.getElementById('reg-username').value = '';
+            document.getElementById('reg-password').value = '';
+            document.getElementById('reg-password-confirm').value = '';
+        };
+
         window.createInitialAdmin = async () => {
             const name = document.getElementById('setup-name').value.trim();
             const username = document.getElementById('setup-username').value.trim();
             const password = document.getElementById('setup-password').value.trim();
+            const passwordConfirm = document.getElementById('setup-password-confirm').value.trim();
 
-            if (!name || !username || !password) return showToast("Rellena todos los campos");
+            if (!name || !username || !password || !passwordConfirm) return showToast("Rellena todos los campos");
+            if (password !== passwordConfirm) return showToast("Las contraseñas no coinciden");
+            if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) return showToast("El nombre de usuario ya está en uso");
 
             try {
                 const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users');
@@ -574,6 +613,33 @@
                 showToast("Administrador creado. Iniciando sesión...");
                 
                 // Cambiar a la pantalla de login, rellenar y acceder automáticamente
+                setTimeout(() => {
+                    showLoginScreen();
+                    document.getElementById('login-username').value = username;
+                    document.getElementById('login-password').value = password;
+                    processLogin();
+                }, 1000);
+            } catch (e) {
+                console.error(e);
+                showToast("Error creando usuario.");
+            }
+        };
+
+        window.processRegister = async () => {
+            const name = document.getElementById('reg-name').value.trim();
+            const username = document.getElementById('reg-username').value.trim();
+            const password = document.getElementById('reg-password').value.trim();
+            const confirmPwd = document.getElementById('reg-password-confirm').value.trim();
+
+            if (!name || !username || !password || !confirmPwd) return showToast("Rellena todos los campos");
+            if (password !== confirmPwd) return showToast("Las contraseñas no coinciden");
+            if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) return showToast("El usuario ya existe. Elige otro.");
+
+            try {
+                const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users');
+                await addDoc(usersRef, { name, username, password, role: 'profesor', tutorGroup: '' });
+                showToast("Cuenta creada. Iniciando sesión...");
+                
                 setTimeout(() => {
                     showLoginScreen();
                     document.getElementById('login-username').value = username;
@@ -717,6 +783,7 @@
             document.getElementById('modal-user-name').value = '';
             document.getElementById('modal-user-username').value = '';
             document.getElementById('modal-user-password').value = '';
+            document.getElementById('modal-user-password-confirm').value = '';
             document.getElementById('modal-user-role').value = 'profesor';
             document.getElementById('modal-user-group').value = '';
             document.getElementById('user-modal-title').textContent = 'Nuevo Usuario';
@@ -731,6 +798,7 @@
             document.getElementById('modal-user-name').value = u.name;
             document.getElementById('modal-user-username').value = u.username;
             document.getElementById('modal-user-password').value = u.password;
+            document.getElementById('modal-user-password-confirm').value = u.password;
             document.getElementById('modal-user-role').value = u.role;
             document.getElementById('modal-user-group').value = u.tutorGroup || '';
             document.getElementById('user-modal-title').textContent = 'Editar Usuario';
@@ -756,10 +824,12 @@
             const name = document.getElementById('modal-user-name').value.trim();
             const username = document.getElementById('modal-user-username').value.trim();
             const password = document.getElementById('modal-user-password').value.trim();
+            const confirmPwd = document.getElementById('modal-user-password-confirm').value.trim();
             const role = document.getElementById('modal-user-role').value;
             let tutorGroup = document.getElementById('modal-user-group').value.trim();
 
-            if (!name || !username || !password) return showToast("Faltan datos");
+            if (!name || !username || !password || !confirmPwd) return showToast("Faltan datos por rellenar");
+            if (password !== confirmPwd) return showToast("Las contraseñas no coinciden");
             if (role === 'tutor' && !tutorGroup) return showToast("Indica el grupo del tutor");
 
             tutorGroup = formatGroupNameForFile(tutorGroup); // Normalizar
@@ -768,11 +838,17 @@
 
             try {
                 if (id) {
+                    // Validar duplicado excluyendo a sí mismo
+                    if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== id)) {
+                        return showToast("El usuario ya existe");
+                    }
                     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users', id), userData);
                     showToast("Usuario actualizado");
                 } else {
-                    // check duplicate username
-                    if (allUsers.some(u => u.username === username)) return showToast("El usuario ya existe");
+                    // Validar duplicado al crear
+                    if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+                        return showToast("El usuario ya existe");
+                    }
                     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users'), userData);
                     showToast("Usuario creado");
                 }
