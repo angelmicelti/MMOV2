@@ -207,7 +207,10 @@
                     
                     <div class="flex justify-between items-center mb-2">
                         <span class="text-sm text-gray-500" id="students-count">0 alumnos</span>
-                        <button onclick="printQRCards()" class="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md font-semibold"><i class="fa-solid fa-print"></i> Imprimir QR</button>
+                        <div class="flex gap-2">
+                            <button onclick="confirmDeleteGroup()" id="btn-delete-group" class="text-sm bg-red-50 text-red-600 px-3 py-1 rounded-md font-semibold hidden"><i class="fa-solid fa-trash-can"></i> Grupo</button>
+                            <button onclick="printQRCards()" class="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md font-semibold"><i class="fa-solid fa-print"></i> Imprimir QR</button>
+                        </div>
                     </div>
 
                     <div class="max-h-80 overflow-y-auto border-t border-gray-100 pt-2" id="students-list">
@@ -299,10 +302,22 @@
         <i class="fa-solid fa-info-circle"></i> <span id="toast-msg">Mensaje</span>
     </div>
 
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
+        <div class="bg-white rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl transform transition-all">
+            <h3 id="confirm-title" class="text-lg font-bold text-gray-800 mb-2">Confirmar</h3>
+            <p id="confirm-message" class="text-gray-600 mb-6 text-sm">¿Estás seguro?</p>
+            <div class="flex justify-end gap-3">
+                <button onclick="closeConfirmModal()" class="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors">Cancelar</button>
+                <button id="confirm-action-btn" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ================= CONFIGURACIÓN FIREBASE =================
         const userFirebaseConfig = {
@@ -665,10 +680,14 @@
         window.renderStudentsList = () => {
             const filter = document.getElementById('group-filter').value;
             const listDiv = document.getElementById('students-list');
+            const btnDeleteGroup = document.getElementById('btn-delete-group');
             
             let filtered = allStudents;
             if (filter !== "ALL") {
                 filtered = allStudents.filter(s => s.course === filter);
+                btnDeleteGroup.classList.remove('hidden');
+            } else {
+                btnDeleteGroup.classList.add('hidden');
             }
             
             filtered.sort((a, b) => a.name.localeCompare(b.name));
@@ -682,13 +701,19 @@
 
             let html = '<ul class="divide-y divide-gray-100">';
             filtered.forEach(s => {
+                const safeName = s.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
                 html += `
                     <li class="py-2 flex justify-between items-center text-sm">
                         <div>
                             <span class="font-medium text-gray-700">${s.name}</span>
                             <span class="block text-xs text-gray-400">${s.course}</span>
                         </div>
-                        <i class="fa-solid fa-qrcode text-gray-300"></i>
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-qrcode text-gray-300"></i>
+                            <button onclick="confirmDeleteStudent('${s.id}', '${safeName}')" class="text-red-400 hover:text-red-600 transition-colors p-2" title="Eliminar alumno">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
                     </li>
                 `;
             });
@@ -753,6 +778,62 @@
             setTimeout(() => {
                 window.print();
             }, 500);
+        };
+
+        // ================= ELIMINACIÓN =================
+        let confirmActionCallback = null;
+
+        window.showConfirmModal = (title, message, callback) => {
+            document.getElementById('confirm-title').textContent = title;
+            document.getElementById('confirm-message').textContent = message;
+            confirmActionCallback = callback;
+            document.getElementById('confirm-modal').classList.remove('hidden');
+        };
+
+        window.closeConfirmModal = () => {
+            document.getElementById('confirm-modal').classList.add('hidden');
+            confirmActionCallback = null;
+        };
+
+        document.getElementById('confirm-action-btn').addEventListener('click', () => {
+            if (confirmActionCallback) {
+                confirmActionCallback();
+            }
+            window.closeConfirmModal();
+        });
+
+        window.confirmDeleteStudent = (id, name) => {
+            window.showConfirmModal('Eliminar Alumno', `¿Estás seguro de que deseas eliminar a ${name}?`, async () => {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students', id));
+                    showToast("Alumno eliminado.");
+                } catch (error) {
+                    console.error("Error al eliminar alumno:", error);
+                    showToast("Error al eliminar.");
+                }
+            });
+        };
+
+        window.confirmDeleteGroup = () => {
+            const group = document.getElementById('group-filter').value;
+            if (group === 'ALL') return;
+            
+            const count = allStudents.filter(s => s.course === group).length;
+            window.showConfirmModal('Eliminar Grupo', `¿Eliminar TODOS los ${count} alumnos de ${group}? Esta acción no se puede deshacer.`, async () => {
+                try {
+                    const studentsToDelete = allStudents.filter(s => s.course === group);
+                    for (const s of studentsToDelete) {
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students', s.id));
+                    }
+                    showToast(`Grupo ${group} eliminado (${count} alumnos).`);
+                    
+                    document.getElementById('group-filter').value = 'ALL';
+                    renderStudentsList();
+                } catch (error) {
+                    console.error("Error al eliminar grupo:", error);
+                    showToast("Error al eliminar grupo.");
+                }
+            });
         };
 
         // ================= INFORMES Y ESTADÍSTICAS =================
