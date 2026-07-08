@@ -271,10 +271,18 @@
                     <h2 class="text-2xl font-bold text-gray-800 leading-tight" id="action-student-name">Nombre del Alumno</h2>
                 </div>
 
-                <div id="status-card" class="rounded-xl p-6 text-center shadow-inner mb-6 transition-all duration-300">
+                <div id="status-card" class="rounded-xl p-6 text-center shadow-inner mb-4 transition-all duration-300">
                     <i id="status-icon" class="fa-solid fa-check-circle text-4xl mb-2"></i>
                     <h3 id="status-text" class="text-xl font-bold uppercase tracking-wide">NO ha ido al servicio</h3>
                     <p id="status-subtext" class="text-sm mt-1 opacity-80">Hoy durante la mañana</p>
+                </div>
+
+                <!-- Franjas horarias en las que ha salido el alumno hoy -->
+                <div id="time-slots-box" class="bg-white border border-gray-200 rounded-xl p-4 mb-6 hidden">
+                    <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                        <i class="fa-solid fa-clock text-blue-500"></i> Ha salido a:
+                    </h4>
+                    <div id="time-slots-list" class="flex flex-wrap gap-2"></div>
                 </div>
 
                 <div class="space-y-6">
@@ -1577,7 +1585,7 @@
             const text = document.getElementById('status-text');
             const subtext = document.getElementById('status-subtext');
 
-            card.className = "rounded-xl p-6 text-center shadow-inner mb-6 transition-all duration-300";
+            card.className = "rounded-xl p-6 text-center shadow-inner mb-4 transition-all duration-300";
 
             if (visitsToday === 0) {
                 card.classList.add('bg-green-100', 'text-green-800');
@@ -1592,6 +1600,25 @@
                 else if (visitsToday === 2) card.classList.add('alert-lvl-2');
                 else if (visitsToday === 3) card.classList.add('alert-lvl-3');
                 else card.classList.add('alert-lvl-extreme');
+            }
+
+            // Mostrar franjas horarias en las que ha salido hoy
+            const slotsBox = document.getElementById('time-slots-box');
+            const slotsList = document.getElementById('time-slots-list');
+            const slots = getStudentTimeSlotsToday(student.id);
+            if (slots.length === 0) {
+                slotsBox.classList.add('hidden');
+                slotsList.innerHTML = '';
+            } else {
+                slotsBox.classList.remove('hidden');
+                slotsList.innerHTML = slots.map(s => {
+                    // Color segun tipo de franja (recreo distinto, etc.)
+                    const isRecreo = s.id === 'recreo';
+                    const colorClass = isRecreo
+                        ? 'bg-amber-100 text-amber-800 border-amber-200'
+                        : 'bg-blue-100 text-blue-800 border-blue-200';
+                    return `<span class="${colorClass} border px-3 py-1 rounded-full text-xs font-bold">${s.label}</span>`;
+                }).join('');
             }
         }
 
@@ -1620,21 +1647,30 @@
             const isRequested = document.getElementById('toggle-request').checked;
             const isAuthorized = document.getElementById('toggle-auth').checked;
 
+            // Calcular franja horaria segun la hora actual
+            // (si esta fuera del horario escolar, getSchoolTimeSlot asigna una aleatoria)
+            const now = Date.now();
+            const slot = getSchoolTimeSlot(now);
+
             try {
                 await addDoc(collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_logs'), {
                     studentId: currentScannedStudent.id,
                     studentName: currentScannedStudent.name,
                     course: currentScannedStudent.course,
-                    timestamp: Date.now(),
+                    timestamp: now,
                     dateString: getLocalTodayString(),
                     requested: isRequested,
                     authorized: isRequested ? isAuthorized : false,
                     // Registro del usuario que autoriza/deniega (para informe por usuarios)
                     userId: currentAppUser ? currentAppUser.id : null,
-                    userName: currentAppUser ? currentAppUser.name : 'Desconocido'
+                    userName: currentAppUser ? currentAppUser.name : 'Desconocido',
+                    // Franja horaria escolar asignada
+                    timeSlotId: slot.id,
+                    timeSlotLabel: slot.label,
+                    timeSlotRandom: slot.isRandom
                 });
                 showToast("Acción registrada");
-                window.cancelAction(); 
+                window.cancelAction();
             } catch (e) {
                 showToast("Error guardando el registro.");
             }
@@ -2508,6 +2544,79 @@
         function getLocalTodayString() {
             const tzoffset = (new Date()).getTimezoneOffset() * 60000;
             return (new Date(Date.now() - tzoffset)).toISOString().split('T')[0];
+        }
+
+        // ================= FRANJAS HORARIAS ESCOLARES =================
+        // Horario del instituto:
+        //   1ª hora:  8:15 - 9:15
+        //   2ª hora:  9:15 - 10:15
+        //   3ª hora: 10:15 - 11:15
+        //   Recreo:  11:15 - 11:45
+        //   4ª hora: 11:45 - 12:45
+        //   5ª hora: 12:45 - 13:45
+        //   6ª hora: 13:45 - 14:45
+        //
+        // Si el registro se hace DENTRO de una franja, se asigna esa franja.
+        // Si se hace FUERA del horario escolar (antes de 8:15 o despues de 14:45),
+        // se asigna una franja aleatoria.
+        const SCHOOL_TIME_SLOTS = [
+            { id: '1',     label: '1ª hora',  start: '08:15', end: '09:15' },
+            { id: '2',     label: '2ª hora',  start: '09:15', end: '10:15' },
+            { id: '3',     label: '3ª hora',  start: '10:15', end: '11:15' },
+            { id: 'recreo',label: 'Recreo',   start: '11:15', end: '11:45' },
+            { id: '4',     label: '4ª hora',  start: '11:45', end: '12:45' },
+            { id: '5',     label: '5ª hora',  start: '12:45', end: '13:45' },
+            { id: '6',     label: '6ª hora',  start: '13:45', end: '14:45' }
+        ];
+
+        // Devuelve { id, label, start, end, isRandom } segun el timestamp dado
+        function getSchoolTimeSlot(timestamp) {
+            const d = new Date(timestamp);
+            // HH:MM en formato "08:15"
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            const currentTime = `${hh}:${mm}`;
+
+            // Buscar franja que contenga currentTime
+            for (const slot of SCHOOL_TIME_SLOTS) {
+                if (currentTime >= slot.start && currentTime < slot.end) {
+                    return { ...slot, isRandom: false };
+                }
+            }
+
+            // Fuera del horario escolar: asignar franja aleatoria
+            const randomSlot = SCHOOL_TIME_SLOTS[Math.floor(Math.random() * SCHOOL_TIME_SLOTS.length)];
+            return { ...randomSlot, isRandom: true };
+        }
+
+        // Devuelve lista de franjas unicas en las que un alumno ha salido autorizado hoy
+        // (filtra duplicados: si salio 2 veces en la 1ª hora, solo cuenta una)
+        function getStudentTimeSlotsToday(studentId) {
+            const todayStr = getLocalTodayString();
+            const todayLogs = allLogs.filter(l =>
+                l.studentId === studentId &&
+                l.dateString === todayStr &&
+                l.authorized === true
+            );
+            // Recoger franjas unicas (por id), preservando el orden de primera aparicion
+            const seen = new Set();
+            const slots = [];
+            todayLogs.forEach(l => {
+                // Soporte para logs viejos (sin timeSlotId) -> calcularlo desde timestamp
+                let slot;
+                if (l.timeSlotId) {
+                    slot = SCHOOL_TIME_SLOTS.find(s => s.id === l.timeSlotId) ||
+                           { id: l.timeSlotId, label: l.timeSlotLabel || l.timeSlotId, start: '?', end: '?' };
+                } else {
+                    const s = getSchoolTimeSlot(l.timestamp);
+                    slot = { id: s.id, label: s.label, start: s.start, end: s.end };
+                }
+                if (!seen.has(slot.id)) {
+                    seen.add(slot.id);
+                    slots.push(slot);
+                }
+            });
+            return slots;
         }
 
         function showToast(msg) {
