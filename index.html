@@ -350,6 +350,7 @@
         <!-- ================= VISTA: INFORMES ================= -->
         <section id="view-reports" class="view-section hidden">
             <div class="max-w-xl mx-auto mt-2 space-y-4">
+                <!-- Filtros comunes (periodo + grupo) -->
                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div class="flex justify-between items-center mb-3">
                         <h2 class="font-bold text-gray-700"><i class="fa-solid fa-chart-pie text-blue-500"></i> Filtros de Informe</h2>
@@ -365,60 +366,118 @@
                             <option value="month">Este mes</option>
                             <option value="all">Todo el curso</option>
                         </select>
-                        <select id="report-group" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
+                        <select id="report-group" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="onReportGroupChange()">
                             <option value="ALL">Todos los grupos</option>
                         </select>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-green-100 p-4 rounded-xl shadow-sm text-center">
-                        <p class="text-green-800 text-xs font-bold uppercase">Autorizadas</p>
-                        <p class="text-3xl font-black text-green-600 mt-1" id="stat-auth">0</p>
-                    </div>
-                    <div class="bg-red-100 p-4 rounded-xl shadow-sm text-center">
-                        <p class="text-red-800 text-xs font-bold uppercase">Denegadas</p>
-                        <p class="text-3xl font-black text-red-600 mt-1" id="stat-denied">0</p>
-                    </div>
-                </div>
-
+                <!-- Pestañas: Alumnado / Usuarios -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="bg-gray-50 text-gray-600 text-xs uppercase border-b border-gray-200">
-                                <th class="p-3">Alumno</th>
-                                <th class="p-3 text-center" title="Autorizadas / Solicitadas">Aut / Sol</th>
-                            </tr>
-                        </thead>
-                        <tbody id="report-table-body" class="text-sm divide-y divide-gray-100"></tbody>
-                    </table>
-                    <div id="report-empty" class="p-6 text-center text-gray-500 hidden">
-                        No hay registros para este periodo.
+                    <div class="flex border-b border-gray-200">
+                        <button id="tab-btn-students" onclick="switchReportTab('students')" class="flex-1 py-3 px-4 text-sm font-bold text-blue-600 bg-blue-50 border-b-2 border-blue-600 transition-colors">
+                            <i class="fa-solid fa-user-graduate"></i> Por Alumnado
+                        </button>
+                        <button id="tab-btn-users" onclick="switchReportTab('users')" class="flex-1 py-3 px-4 text-sm font-bold text-gray-500 bg-white border-b-2 border-transparent hover:bg-gray-50 transition-colors">
+                            <i class="fa-solid fa-user-check"></i> Por Usuarios
+                        </button>
                     </div>
-                </div>
 
-                <!-- Informe por usuarios (profesores que autorizan/deniegan) -->
-                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div class="px-3 pt-3 pb-2 border-b border-gray-100">
-                        <h3 class="font-bold text-gray-700 flex items-center gap-2 text-sm">
-                            <i class="fa-solid fa-user-check text-blue-500"></i> Informe por Usuarios
-                        </h3>
-                        <p class="text-[10px] text-gray-500 mt-1">Desglose de autorizaciones/denegaciones por profesor</p>
+                    <!-- Contenido pestaña Alumnado -->
+                    <div id="report-tab-students" class="p-4 space-y-3">
+                        <!-- Selector de alumno concreto -->
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Alumno concreto</label>
+                            <select id="report-student" class="w-full border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
+                                <option value="ALL">Todos los alumnos</option>
+                            </select>
+                        </div>
+
+                        <!-- Stats globales (respetan filtro de alumno) -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-green-100 p-3 rounded-lg text-center">
+                                <p class="text-green-800 text-[10px] font-bold uppercase">Autorizadas</p>
+                                <p class="text-2xl font-black text-green-600 mt-1" id="stat-auth">0</p>
+                            </div>
+                            <div class="bg-red-100 p-3 rounded-lg text-center">
+                                <p class="text-red-800 text-[10px] font-bold uppercase">Denegadas</p>
+                                <p class="text-2xl font-black text-red-600 mt-1" id="stat-denied">0</p>
+                            </div>
+                        </div>
+
+                        <!-- Tabla por alumnos (oculta si se eligió uno concreto) -->
+                        <div id="report-students-table-wrapper" class="overflow-hidden border border-gray-100 rounded-lg">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 text-gray-600 text-xs uppercase border-b border-gray-200">
+                                        <th class="p-3">Alumno</th>
+                                        <th class="p-3 text-center" title="Autorizadas / Solicitadas">Aut / Sol</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="report-table-body" class="text-sm divide-y divide-gray-100"></tbody>
+                            </table>
+                            <div id="report-empty" class="p-6 text-center text-gray-500 hidden">
+                                No hay registros para este periodo.
+                            </div>
+                        </div>
+
+                        <!-- Detalle del alumno concreto (visible solo si se eligió uno) -->
+                        <div id="report-student-detail" class="hidden bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <h4 class="font-bold text-blue-800 text-sm mb-2" id="report-student-detail-title">Detalle</h4>
+                            <div id="report-student-detail-body" class="text-xs text-gray-700 space-y-1"></div>
+                        </div>
                     </div>
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="bg-gray-50 text-gray-600 text-xs uppercase border-b border-gray-200">
-                                <th class="p-3">Usuario</th>
-                                <th class="p-3 text-center" title="Autorizadas">Aut</th>
-                                <th class="p-3 text-center" title="Denegadas">Den</th>
-                                <th class="p-3 text-center" title="Total de acciones">Total</th>
-                                <th class="p-3 text-center" title="% de autorizaciones sobre el total">% Aut</th>
-                            </tr>
-                        </thead>
-                        <tbody id="report-users-table-body" class="text-sm divide-y divide-gray-100"></tbody>
-                    </table>
-                    <div id="report-users-empty" class="p-6 text-center text-gray-500 hidden">
-                        No hay registros de usuarios para este periodo.
+
+                    <!-- Contenido pestaña Usuarios -->
+                    <div id="report-tab-users" class="p-4 space-y-3 hidden">
+                        <!-- Selector de usuario concreto -->
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usuario concreto</label>
+                            <select id="report-user" class="w-full border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
+                                <option value="ALL">Todos los usuarios</option>
+                            </select>
+                        </div>
+
+                        <!-- Stats globales (respetan filtro de usuario) -->
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="bg-green-100 p-3 rounded-lg text-center">
+                                <p class="text-green-800 text-[10px] font-bold uppercase">Autorizadas</p>
+                                <p class="text-xl font-black text-green-600 mt-1" id="stat-user-auth">0</p>
+                            </div>
+                            <div class="bg-red-100 p-3 rounded-lg text-center">
+                                <p class="text-red-800 text-[10px] font-bold uppercase">Denegadas</p>
+                                <p class="text-xl font-black text-red-600 mt-1" id="stat-user-denied">0</p>
+                            </div>
+                            <div class="bg-blue-100 p-3 rounded-lg text-center">
+                                <p class="text-blue-800 text-[10px] font-bold uppercase">% Aut</p>
+                                <p class="text-xl font-black text-blue-600 mt-1" id="stat-user-pct">0%</p>
+                            </div>
+                        </div>
+
+                        <!-- Tabla por usuarios (oculta si se eligió uno concreto) -->
+                        <div id="report-users-table-wrapper" class="overflow-hidden border border-gray-100 rounded-lg">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 text-gray-600 text-xs uppercase border-b border-gray-200">
+                                        <th class="p-3">Usuario</th>
+                                        <th class="p-3 text-center" title="Autorizadas">Aut</th>
+                                        <th class="p-3 text-center" title="Denegadas">Den</th>
+                                        <th class="p-3 text-center" title="Total">Total</th>
+                                        <th class="p-3 text-center" title="% autorizaciones">% Aut</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="report-users-table-body" class="text-sm divide-y divide-gray-100"></tbody>
+                            </table>
+                            <div id="report-users-empty" class="p-6 text-center text-gray-500 hidden">
+                                No hay registros de usuarios para este periodo.
+                            </div>
+                        </div>
+
+                        <!-- Detalle del usuario concreto (visible solo si se eligió uno) -->
+                        <div id="report-user-detail" class="hidden bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <h4 class="font-bold text-blue-800 text-sm mb-2" id="report-user-detail-title">Detalle</h4>
+                            <div id="report-user-detail-body" class="text-xs text-gray-700 space-y-1"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1622,11 +1681,13 @@
             const groups = [...new Set(allStudents.map(s => s.course))].sort();
             const filterSelect = document.getElementById('group-filter');
             const reportSelect = document.getElementById('report-group');
-            
+
             if (currentAppUser.role === 'tutor') {
                 const tg = currentAppUser.tutorGroup;
                 filterSelect.innerHTML = `<option value="${tg}">${tg}</option>`;
                 reportSelect.innerHTML = `<option value="${tg}">${tg}</option>`;
+                updateStudentSelector(tg);
+                updateUserSelector();
                 return;
             }
 
@@ -1638,9 +1699,94 @@
             filterSelect.innerHTML = optionsHtml;
             reportSelect.innerHTML = optionsHtml;
 
-            if(groups.includes(currentFilter)) filterSelect.value = currentFilter;
-            if(groups.includes(currentReport)) reportSelect.value = currentReport;
+            // Restaurar selecciones previas si siguen siendo validas
+            if ([...filterSelect.options].some(o => o.value === currentFilter)) filterSelect.value = currentFilter;
+            if ([...reportSelect.options].some(o => o.value === currentReport)) reportSelect.value = currentReport;
+
+            // Rellenar selector de alumnos del informe
+            updateStudentSelector(reportSelect.value);
+            // Rellenar selector de usuarios del informe
+            updateUserSelector();
         }
+
+        // Rellena el dropdown de alumnos del informe segun el grupo seleccionado
+        function updateStudentSelector(groupFilter) {
+            const sel = document.getElementById('report-student');
+            if (!sel) return;
+            const currentVal = sel.value;
+            let students = allStudents;
+            if (groupFilter && groupFilter !== 'ALL') {
+                students = students.filter(s => s.course === groupFilter);
+            }
+            students = [...students].sort((a, b) => a.name.localeCompare(b.name));
+            let html = '<option value="ALL">Todos los alumnos</option>';
+            students.forEach(s => {
+                html += `<option value="${s.id}">${s.name} (${s.course})</option>`;
+            });
+            sel.innerHTML = html;
+            // Restaurar seleccion previa si sigue siendo valida
+            if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
+        }
+        window.updateStudentSelector = updateStudentSelector;
+
+        // Rellena el dropdown de usuarios del informe (profesores/admins)
+        function updateUserSelector() {
+            const sel = document.getElementById('report-user');
+            if (!sel) return;
+            const currentVal = sel.value;
+            // Lista de usuarios conocidos desde allUsers + cualquier userName que aparezca en logs
+            // (por si hay logs de usuarios ya eliminados)
+            const userMap = new Map();
+            allUsers.forEach(u => userMap.set(u.id, u.name));
+            allLogs.forEach(l => {
+                if (l.userId && l.userName && !userMap.has(l.userId)) {
+                    userMap.set(l.userId, l.userName);
+                }
+            });
+            const users = [...userMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+            let html = '<option value="ALL">Todos los usuarios</option>';
+            users.forEach(([id, name]) => {
+                html += `<option value="${id}">${name}</option>`;
+            });
+            sel.innerHTML = html;
+            // Restaurar seleccion previa si sigue siendo valida
+            if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
+        }
+        window.updateUserSelector = updateUserSelector;
+
+        // Cambia de grupo en el informe -> actualiza lista de alumnos
+        window.onReportGroupChange = () => {
+            const groupFilter = document.getElementById('report-group').value;
+            updateStudentSelector(groupFilter);
+            generateReport();
+        };
+
+        // Cambia de pestana en el informe
+        let currentReportTab = 'students';
+        window.switchReportTab = (tabId) => {
+            currentReportTab = tabId;
+            const tabStudents = document.getElementById('report-tab-students');
+            const tabUsers = document.getElementById('report-tab-users');
+            const btnStudents = document.getElementById('tab-btn-students');
+            const btnUsers = document.getElementById('tab-btn-users');
+
+            if (tabId === 'students') {
+                tabStudents.classList.remove('hidden');
+                tabUsers.classList.add('hidden');
+                btnStudents.classList.add('text-blue-600', 'bg-blue-50', 'border-blue-600');
+                btnStudents.classList.remove('text-gray-500', 'bg-white', 'border-transparent');
+                btnUsers.classList.remove('text-blue-600', 'bg-blue-50', 'border-blue-600');
+                btnUsers.classList.add('text-gray-500', 'bg-white', 'border-transparent');
+            } else {
+                tabUsers.classList.remove('hidden');
+                tabStudents.classList.add('hidden');
+                btnUsers.classList.add('text-blue-600', 'bg-blue-50', 'border-blue-600');
+                btnUsers.classList.remove('text-gray-500', 'bg-white', 'border-transparent');
+                btnStudents.classList.remove('text-blue-600', 'bg-blue-50', 'border-blue-600');
+                btnStudents.classList.add('text-gray-500', 'bg-white', 'border-transparent');
+            }
+            generateReport();
+        };
 
         window.renderStudentsList = () => {
             if (currentAppUser?.role === 'profesor') return; // Bloqueado
@@ -1986,106 +2132,214 @@
             if(!currentAppUser) return;
             const timeFilter = document.getElementById('report-time').value;
             const groupFilter = document.getElementById('report-group').value;
+            const studentFilter = document.getElementById('report-student') ?
+                document.getElementById('report-student').value : 'ALL';
+            const userFilter = document.getElementById('report-user') ?
+                document.getElementById('report-user').value : 'ALL';
 
             let filteredLogs = allLogs;
             const todayStr = getLocalTodayString();
-            
+
+            // Filtro por periodo
             if (timeFilter === 'today') filteredLogs = filteredLogs.filter(l => l.dateString === todayStr);
             else if (timeFilter === 'week') { const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); filteredLogs = filteredLogs.filter(l => l.timestamp >= weekAgo); }
             else if (timeFilter === 'month') { const monthStr = todayStr.substring(0, 7); filteredLogs = filteredLogs.filter(l => l.dateString.startsWith(monthStr)); }
 
+            // Filtro por grupo
             if (groupFilter !== 'ALL') filteredLogs = filteredLogs.filter(l => l.course === groupFilter);
 
             window.currentFilteredLogs = filteredLogs;
 
-            let totalRequested = filteredLogs.filter(l => l.requested).length;
-            let totalAuth = filteredLogs.filter(l => l.authorized).length;
-            document.getElementById('stat-auth').textContent = totalAuth;
-            document.getElementById('stat-denied').textContent = totalRequested - totalAuth;
+            // ============ PESTAÑA ALUMNADO ============
+            // Si hay un alumno concreto seleccionado, mostrar su detalle
+            const studentDetail = document.getElementById('report-student-detail');
+            const studentsTableWrapper = document.getElementById('report-students-table-wrapper');
 
-            const statsByStudent = {};
-            filteredLogs.forEach(log => {
-                if (log.requested) {
-                    if (!statsByStudent[log.studentId]) statsByStudent[log.studentId] = { name: log.studentName, course: log.course, req: 0, auth: 0 };
-                    statsByStudent[log.studentId].req++;
-                    if (log.authorized) statsByStudent[log.studentId].auth++;
+            if (studentFilter && studentFilter !== 'ALL') {
+                // Mostrar detalle del alumno concreto
+                const student = allStudents.find(s => s.id === studentFilter);
+                const studentLogs = filteredLogs.filter(l => l.studentId === studentFilter);
+                const studentName = student ? student.name : (studentLogs[0]?.studentName || 'Alumno');
+                const studentCourse = student ? student.course : (studentLogs[0]?.course || '-');
+
+                // Stats del alumno
+                const reqLogs = studentLogs.filter(l => l.requested);
+                const authLogs = reqLogs.filter(l => l.authorized);
+                const denLogs = reqLogs.filter(l => !l.authorized);
+
+                document.getElementById('stat-auth').textContent = authLogs.length;
+                document.getElementById('stat-denied').textContent = denLogs.length;
+
+                // Mostrar detalle
+                studentDetail.classList.remove('hidden');
+                studentsTableWrapper.classList.add('hidden');
+                document.getElementById('report-student-detail-title').textContent = `${studentName} (${studentCourse})`;
+
+                // Listar ultimos 10 registros del alumno
+                const sortedLogs = [...studentLogs].sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
+                let detailHtml = '';
+                if (sortedLogs.length === 0) {
+                    detailHtml = '<p class="text-gray-500 italic">Sin registros en este periodo.</p>';
+                } else {
+                    sortedLogs.forEach(l => {
+                        const d = new Date(l.timestamp);
+                        const dateStr = d.toLocaleDateString('es-ES') + ' ' + d.toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
+                        const status = !l.requested ? '<span class="text-gray-500">No solicitó</span>'
+                            : (l.authorized ? '<span class="text-green-700 font-bold">Autorizada</span>' : '<span class="text-red-700 font-bold">Denegada</span>');
+                        const user = l.userName ? `<span class="text-gray-500">por ${l.userName}</span>` : '';
+                        detailHtml += `<div class="flex justify-between border-b border-blue-100 pb-1"><span>${dateStr}</span><span>${status} ${user}</span></div>`;
+                    });
                 }
-            });
+                document.getElementById('report-student-detail-body').innerHTML = detailHtml;
+            } else {
+                // Mostrar tabla de todos los alumnos
+                studentDetail.classList.add('hidden');
+                studentsTableWrapper.classList.remove('hidden');
 
-            const tbody = document.getElementById('report-table-body');
-            tbody.innerHTML = '';
-            const studentKeys = Object.keys(statsByStudent);
+                let totalRequested = filteredLogs.filter(l => l.requested).length;
+                let totalAuth = filteredLogs.filter(l => l.authorized).length;
+                document.getElementById('stat-auth').textContent = totalAuth;
+                document.getElementById('stat-denied').textContent = totalRequested - totalAuth;
 
-            if (studentKeys.length === 0) document.getElementById('report-empty').classList.remove('hidden');
-            else {
-                document.getElementById('report-empty').classList.add('hidden');
-                const sortedStats = studentKeys.map(k => ({ id: k, ...statsByStudent[k] })).sort((a, b) => b.auth - a.auth);
-                const canDelete = currentAppUser.role === 'admin';
-
-                sortedStats.forEach(stat => {
-                    const safeName = stat.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
-                    let alertClass = (stat.auth >= 3 && timeFilter === 'today') ? "text-red-600 font-bold" : "";
-                    const deleteBtnHtml = canDelete ? `<button onclick="confirmDeleteStudentLogs('${stat.id}', '${safeName}')" class="text-red-400 hover:text-red-600 p-1"><i class="fa-solid fa-trash-can"></i></button>` : '';
-
-                    tbody.insertAdjacentHTML('beforeend', `
-                        <tr class="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                            <td class="p-3"><span class="block font-medium text-gray-800 ${alertClass}">${stat.name}</span><span class="block text-[10px] text-gray-400">${stat.course}</span></td>
-                            <td class="p-3 text-right whitespace-nowrap"><span class="bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold mr-2">${stat.auth} / ${stat.req}</span>${deleteBtnHtml}</td>
-                        </tr>
-                    `);
+                const statsByStudent = {};
+                filteredLogs.forEach(log => {
+                    if (log.requested) {
+                        if (!statsByStudent[log.studentId]) statsByStudent[log.studentId] = { name: log.studentName, course: log.course, req: 0, auth: 0 };
+                        statsByStudent[log.studentId].req++;
+                        if (log.authorized) statsByStudent[log.studentId].auth++;
+                    }
                 });
+
+                const tbody = document.getElementById('report-table-body');
+                tbody.innerHTML = '';
+                const studentKeys = Object.keys(statsByStudent);
+
+                if (studentKeys.length === 0) {
+                    document.getElementById('report-empty').classList.remove('hidden');
+                } else {
+                    document.getElementById('report-empty').classList.add('hidden');
+                    const sortedStats = studentKeys.map(k => ({ id: k, ...statsByStudent[k] })).sort((a, b) => b.auth - a.auth);
+                    const canDelete = currentAppUser.role === 'admin';
+
+                    sortedStats.forEach(stat => {
+                        const safeName = stat.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+                        let alertClass = (stat.auth >= 3 && timeFilter === 'today') ? "text-red-600 font-bold" : "";
+                        const deleteBtnHtml = canDelete ? `<button onclick="confirmDeleteStudentLogs('${stat.id}', '${safeName}')" class="text-red-400 hover:text-red-600 p-1"><i class="fa-solid fa-trash-can"></i></button>` : '';
+
+                        tbody.insertAdjacentHTML('beforeend', `
+                            <tr class="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                                <td class="p-3"><span class="block font-medium text-gray-800 ${alertClass}">${stat.name}</span><span class="block text-[10px] text-gray-400">${stat.course}</span></td>
+                                <td class="p-3 text-right whitespace-nowrap"><span class="bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold mr-2">${stat.auth} / ${stat.req}</span>${deleteBtnHtml}</td>
+                            </tr>
+                        `);
+                    });
+                }
             }
 
-            // ================= INFORME POR USUARIOS =================
-            // Cuenta cuantas autorizaciones y denegaciones ha hecho cada usuario
-            // (profesor que esta usando la app cuando se registra la accion)
-            const statsByUser = {};
-            filteredLogs.forEach(log => {
-                if (log.requested) {
-                    const uid = log.userId || 'unknown';
-                    const uname = log.userName || 'Desconocido';
-                    if (!statsByUser[uid]) statsByUser[uid] = { name: uname, auth: 0, den: 0 };
-                    if (log.authorized) statsByUser[uid].auth++;
-                    else statsByUser[uid].den++;
+            // ============ PESTAÑA USUARIOS ============
+            // Si hay un usuario concreto seleccionado, mostrar su detalle
+            const userDetail = document.getElementById('report-user-detail');
+            const usersTableWrapper = document.getElementById('report-users-table-wrapper');
+
+            if (userFilter && userFilter !== 'ALL') {
+                // Filtrar logs del usuario concreto
+                const userLogs = filteredLogs.filter(l => l.userId === userFilter);
+                const reqLogs = userLogs.filter(l => l.requested);
+                const authLogs = reqLogs.filter(l => l.authorized);
+                const denLogs = reqLogs.filter(l => !l.authorized);
+                const total = reqLogs.length;
+                const pct = total > 0 ? Math.round((authLogs.length / total) * 100) : 0;
+
+                document.getElementById('stat-user-auth').textContent = authLogs.length;
+                document.getElementById('stat-user-denied').textContent = denLogs.length;
+                document.getElementById('stat-user-pct').textContent = pct + '%';
+
+                // Mostrar detalle
+                userDetail.classList.remove('hidden');
+                usersTableWrapper.classList.add('hidden');
+
+                // Buscar nombre del usuario
+                const userObj = allUsers.find(u => u.id === userFilter);
+                const userName = userObj ? userObj.name : (reqLogs[0]?.userName || 'Usuario');
+
+                document.getElementById('report-user-detail-title').textContent = `${userName}`;
+
+                // Listar ultimos 10 registros del usuario
+                const sortedLogs = [...userLogs].sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
+                let detailHtml = '';
+                if (sortedLogs.length === 0) {
+                    detailHtml = '<p class="text-gray-500 italic">Sin registros en este periodo.</p>';
+                } else {
+                    sortedLogs.forEach(l => {
+                        const d = new Date(l.timestamp);
+                        const dateStr = d.toLocaleDateString('es-ES') + ' ' + d.toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
+                        const status = !l.requested ? '<span class="text-gray-500">No solicitó</span>'
+                            : (l.authorized ? '<span class="text-green-700 font-bold">Autorizada</span>' : '<span class="text-red-700 font-bold">Denegada</span>');
+                        const student = `<span class="text-gray-600">${l.studentName || 'Alumno desconocido'}</span>`;
+                        detailHtml += `<div class="flex justify-between border-b border-blue-100 pb-1"><span>${dateStr}</span><span>${student} - ${status}</span></div>`;
+                    });
                 }
-            });
-
-            const usersTbody = document.getElementById('report-users-table-body');
-            usersTbody.innerHTML = '';
-            const userKeys = Object.keys(statsByUser);
-
-            if (userKeys.length === 0) {
-                document.getElementById('report-users-empty').classList.remove('hidden');
+                document.getElementById('report-user-detail-body').innerHTML = detailHtml;
             } else {
-                document.getElementById('report-users-empty').classList.add('hidden');
-                // Ordenar por total de acciones descendente
-                const sortedUserStats = userKeys.map(k => ({ id: k, ...statsByUser[k] }))
-                    .map(s => ({ ...s, total: s.auth + s.den, pct: (s.auth + s.den) > 0 ? Math.round((s.auth / (s.auth + s.den)) * 100) : 0 }))
-                    .sort((a, b) => b.total - a.total);
+                // Mostrar tabla de todos los usuarios
+                userDetail.classList.add('hidden');
+                usersTableWrapper.classList.remove('hidden');
 
-                sortedUserStats.forEach(stat => {
-                    // Color del % aut: verde si alto, ambar si medio, rojo si bajo
-                    let pctColorClass = 'text-gray-700';
-                    if (stat.pct >= 70) pctColorClass = 'text-green-700';
-                    else if (stat.pct >= 40) pctColorClass = 'text-amber-600';
-                    else pctColorClass = 'text-red-600';
-
-                    usersTbody.insertAdjacentHTML('beforeend', `
-                        <tr class="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                            <td class="p-3">
-                                <span class="block font-medium text-gray-800">${stat.name}</span>
-                            </td>
-                            <td class="p-3 text-center">
-                                <span class="inline-block bg-green-100 text-green-800 px-2 py-1 rounded font-bold text-xs">${stat.auth}</span>
-                            </td>
-                            <td class="p-3 text-center">
-                                <span class="inline-block bg-red-100 text-red-800 px-2 py-1 rounded font-bold text-xs">${stat.den}</span>
-                            </td>
-                            <td class="p-3 text-center font-bold text-gray-700">${stat.total}</td>
-                            <td class="p-3 text-center font-bold ${pctColorClass}">${stat.pct}%</td>
-                        </tr>
-                    `);
+                const statsByUser = {};
+                filteredLogs.forEach(log => {
+                    if (log.requested) {
+                        const uid = log.userId || 'unknown';
+                        const uname = log.userName || 'Desconocido';
+                        if (!statsByUser[uid]) statsByUser[uid] = { name: uname, auth: 0, den: 0 };
+                        if (log.authorized) statsByUser[uid].auth++;
+                        else statsByUser[uid].den++;
+                    }
                 });
+
+                // Stats globales de usuarios (todos)
+                const allReq = filteredLogs.filter(l => l.requested);
+                const allAuth = allReq.filter(l => l.authorized).length;
+                const allDen = allReq.length - allAuth;
+                const allPct = allReq.length > 0 ? Math.round((allAuth / allReq.length) * 100) : 0;
+                document.getElementById('stat-user-auth').textContent = allAuth;
+                document.getElementById('stat-user-denied').textContent = allDen;
+                document.getElementById('stat-user-pct').textContent = allPct + '%';
+
+                const usersTbody = document.getElementById('report-users-table-body');
+                usersTbody.innerHTML = '';
+                const userKeys = Object.keys(statsByUser);
+
+                if (userKeys.length === 0) {
+                    document.getElementById('report-users-empty').classList.remove('hidden');
+                } else {
+                    document.getElementById('report-users-empty').classList.add('hidden');
+                    const sortedUserStats = userKeys.map(k => ({ id: k, ...statsByUser[k] }))
+                        .map(s => ({ ...s, total: s.auth + s.den, pct: (s.auth + s.den) > 0 ? Math.round((s.auth / (s.auth + s.den)) * 100) : 0 }))
+                        .sort((a, b) => b.total - a.total);
+
+                    sortedUserStats.forEach(stat => {
+                        let pctColorClass = 'text-gray-700';
+                        if (stat.pct >= 70) pctColorClass = 'text-green-700';
+                        else if (stat.pct >= 40) pctColorClass = 'text-amber-600';
+                        else pctColorClass = 'text-red-600';
+
+                        usersTbody.insertAdjacentHTML('beforeend', `
+                            <tr class="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                                <td class="p-3">
+                                    <span class="block font-medium text-gray-800">${stat.name}</span>
+                                </td>
+                                <td class="p-3 text-center">
+                                    <span class="inline-block bg-green-100 text-green-800 px-2 py-1 rounded font-bold text-xs">${stat.auth}</span>
+                                </td>
+                                <td class="p-3 text-center">
+                                    <span class="inline-block bg-red-100 text-red-800 px-2 py-1 rounded font-bold text-xs">${stat.den}</span>
+                                </td>
+                                <td class="p-3 text-center font-bold text-gray-700">${stat.total}</td>
+                                <td class="p-3 text-center font-bold ${pctColorClass}">${stat.pct}%</td>
+                            </tr>
+                        `);
+                    });
+                }
             }
         };
 
@@ -2095,32 +2349,80 @@
 
             const timeFilterText = document.getElementById('report-time').options[document.getElementById('report-time').selectedIndex].text;
             const groupFilter = document.getElementById('report-group').value;
+            const studentFilter = document.getElementById('report-student') ?
+                document.getElementById('report-student').value : 'ALL';
+            const userFilter = document.getElementById('report-user') ?
+                document.getElementById('report-user').value : 'ALL';
 
-            // Tabla por alumnos (limpiar botones y normalizar estilos)
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = `<table><tbody>${document.getElementById('report-table-body').innerHTML}</tbody></table>`;
-            tempDiv.querySelectorAll('button').forEach(btn => btn.remove());
-            tempDiv.querySelectorAll('span.bg-blue-100').forEach(span => { span.className = 'badge'; });
-
-            // Tabla por usuarios (clonar para impresion)
-            const usersTempDiv = document.createElement('div');
-            usersTempDiv.innerHTML = `<table><tbody>${document.getElementById('report-users-table-body').innerHTML}</tbody></table>`;
+            // Construir subtitulo segun filtros aplicados
+            let subtitleParts = [];
+            subtitleParts.push(`Periodo: ${timeFilterText}`);
+            subtitleParts.push(`Grupo: ${groupFilter === 'ALL' ? 'Todos' : groupFilter}`);
+            if (currentReportTab === 'students' && studentFilter !== 'ALL') {
+                const s = allStudents.find(x => x.id === studentFilter);
+                subtitleParts.push(`Alumno: ${s ? s.name : 'desconocido'}`);
+            }
+            if (currentReportTab === 'users' && userFilter !== 'ALL') {
+                const u = allUsers.find(x => x.id === userFilter);
+                subtitleParts.push(`Usuario: ${u ? u.name : 'desconocido'}`);
+            }
+            const subtitle = subtitleParts.join(' | ');
 
             const style = document.createElement('style');
-            style.innerHTML = `@page { size: A4; margin: 1.5cm; } .report-header { text-align: center; margin-bottom: 20px; font-family: sans-serif; } .report-title { font-size: 24px; font-weight: bold; margin-bottom: 5px; color: #1f2937; } .report-subtitle { font-size: 14px; color: #4b5563; margin-bottom: 20px; } .stats-container { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; font-family: sans-serif; } .stat-box { border: 1px solid #e5e7eb; padding: 15px 30px; border-radius: 8px; text-align: center; flex: 1; max-width: 200px; } .stat-label { font-size: 12px; text-transform: uppercase; font-weight: bold; color: #6b7280; } .stat-value { font-size: 28px; font-weight: 900; } .stat-auth .stat-value { color: #16a34a; } .stat-denied .stat-value { color: #dc2626; } .report-section-title { font-size: 16px; font-weight: bold; color: #1f2937; margin-top: 30px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #1f2937; font-family: sans-serif; } .report-table { width: 100%; border-collapse: collapse; font-family: sans-serif; margin-bottom: 20px; } .report-table th { background-color: #f9fafb; padding: 10px; border-bottom: 2px solid #e5e7eb; text-align: left; font-size: 12px; text-transform: uppercase; color: #4b5563; } .report-table td { padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 13px; } .report-table.users-table th, .report-table.users-table td { text-align: center; } .report-table.users-table td:first-child, .report-table.users-table th:first-child { text-align: left; } .badge { display: inline-block; background-color: #eff6ff; color: #1e3a8a; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid #bfdbfe; margin-right: 8px; } .badge-green { background-color: #dcfce7; color: #166534; border-color: #86efac; } .badge-red { background-color: #fee2e2; color: #991b1b; border-color: #fca5a5; } [class~="block"] { display: block; } [class~="text-[10px]"] { font-size: 10px; } [class~="text-gray-400"] { color: #9ca3af; } [class~="text-gray-800"] { color: #1f2937; } [class~="font-medium"] { font-weight: 500; } [class~="text-red-600"] { color: #dc2626; } [class~="text-green-700"] { color: #15803d; } [class~="text-amber-600"] { color: #d97706; } [class~="font-bold"] { font-weight: 700; } [class~="text-right"] { text-align: right; } [class~="text-center"] { text-align: center; }`;
+            style.innerHTML = `@page { size: A4; margin: 1.5cm; } .report-header { text-align: center; margin-bottom: 20px; font-family: sans-serif; } .report-title { font-size: 24px; font-weight: bold; margin-bottom: 5px; color: #1f2937; } .report-subtitle { font-size: 13px; color: #4b5563; margin-bottom: 20px; } .stats-container { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; font-family: sans-serif; } .stat-box { border: 1px solid #e5e7eb; padding: 15px 30px; border-radius: 8px; text-align: center; flex: 1; max-width: 200px; } .stat-label { font-size: 12px; text-transform: uppercase; font-weight: bold; color: #6b7280; } .stat-value { font-size: 28px; font-weight: 900; } .stat-auth .stat-value { color: #16a34a; } .stat-denied .stat-value { color: #dc2626; } .stat-pct .stat-value { color: #2563eb; } .report-section-title { font-size: 16px; font-weight: bold; color: #1f2937; margin-top: 20px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #1f2937; font-family: sans-serif; } .report-table { width: 100%; border-collapse: collapse; font-family: sans-serif; margin-bottom: 20px; } .report-table th { background-color: #f9fafb; padding: 10px; border-bottom: 2px solid #e5e7eb; text-align: left; font-size: 12px; text-transform: uppercase; color: #4b5563; } .report-table td { padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 13px; } .report-table.users-table th, .report-table.users-table td { text-align: center; } .report-table.users-table td:first-child, .report-table.users-table th:first-child { text-align: left; } .report-detail-list { font-family: sans-serif; font-size: 12px; } .report-detail-list .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #e5e7eb; } .badge { display: inline-block; background-color: #eff6ff; color: #1e3a8a; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 1px solid #bfdbfe; margin-right: 8px; } .badge-green { background-color: #dcfce7; color: #166534; border-color: #86efac; } .badge-red { background-color: #fee2e2; color: #991b1b; border-color: #fca5a5; } [class~="block"] { display: block; } [class~="text-[10px]"] { font-size: 10px; } [class~="text-gray-400"] { color: #9ca3af; } [class~="text-gray-500"] { color: #6b7280; } [class~="text-gray-600"] { color: #4b5563; } [class~="text-gray-800"] { color: #1f2937; } [class~="font-medium"] { font-weight: 500; } [class~="text-red-600"] { color: #dc2626; } [class~="text-red-700"] { color: #b91c1c; } [class~="text-green-700"] { color: #15803d; } [class~="text-amber-600"] { color: #d97706; } [class~="font-bold"] { font-weight: 700; } [class~="text-right"] { text-align: right; } [class~="text-center"] { text-align: center; }`;
             printArea.appendChild(style);
 
-            const content = document.createElement('div');
-            content.innerHTML = `
-                <div class="report-header"><div class="report-title">Informe Pisaporte V2</div><div class="report-subtitle">Grupo: ${groupFilter === 'ALL' ? 'Todos los grupos' : groupFilter} | Periodo: ${timeFilterText}</div></div>
+            let contentHtml = `
+                <div class="report-header">
+                    <div class="report-title">Informe Pisaporte V2</div>
+                    <div class="report-subtitle">${subtitle}</div>
+                </div>`;
+
+            if (currentReportTab === 'students') {
+                // Pestaña Alumnado
+                contentHtml += `
                 <div class="stats-container">
                     <div class="stat-box stat-auth"><div class="stat-label">Autorizadas</div><div class="stat-value">${document.getElementById('stat-auth').textContent}</div></div>
                     <div class="stat-box stat-denied"><div class="stat-label">Denegadas</div><div class="stat-value">${document.getElementById('stat-denied').textContent}</div></div>
-                </div>
-                <div class="report-section-title">Informe por Alumnado</div>
-                <table class="report-table"><thead><tr><th>Alumno</th><th class="text-right">Aut / Sol</th></tr></thead><tbody>${tempDiv.querySelector('tbody').innerHTML}</tbody></table>
-                <div class="report-section-title">Informe por Usuarios</div>
-                <table class="report-table users-table"><thead><tr><th>Usuario</th><th>Aut</th><th>Den</th><th>Total</th><th>% Aut</th></tr></thead><tbody>${usersTempDiv.querySelector('tbody').innerHTML}</tbody></table>`;
+                </div>`;
+
+                if (studentFilter && studentFilter !== 'ALL') {
+                    // Detalle del alumno concreto
+                    contentHtml += `<div class="report-section-title">Detalle del alumno</div>`;
+                    contentHtml += `<div class="report-detail-list">${document.getElementById('report-student-detail-body').innerHTML}</div>`;
+                } else {
+                    // Tabla de todos los alumnos
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = `<table><tbody>${document.getElementById('report-table-body').innerHTML}</tbody></table>`;
+                    tempDiv.querySelectorAll('button').forEach(btn => btn.remove());
+                    tempDiv.querySelectorAll('span.bg-blue-100').forEach(span => { span.className = 'badge'; });
+                    contentHtml += `<div class="report-section-title">Informe por Alumnado</div>`;
+                    contentHtml += `<table class="report-table"><thead><tr><th>Alumno</th><th class="text-right">Aut / Sol</th></tr></thead><tbody>${tempDiv.querySelector('tbody').innerHTML}</tbody></table>`;
+                }
+            } else {
+                // Pestaña Usuarios
+                contentHtml += `
+                <div class="stats-container">
+                    <div class="stat-box stat-auth"><div class="stat-label">Autorizadas</div><div class="stat-value">${document.getElementById('stat-user-auth').textContent}</div></div>
+                    <div class="stat-box stat-denied"><div class="stat-label">Denegadas</div><div class="stat-value">${document.getElementById('stat-user-denied').textContent}</div></div>
+                    <div class="stat-box stat-pct"><div class="stat-label">% Autorizaciones</div><div class="stat-value">${document.getElementById('stat-user-pct').textContent}</div></div>
+                </div>`;
+
+                if (userFilter && userFilter !== 'ALL') {
+                    // Detalle del usuario concreto
+                    contentHtml += `<div class="report-section-title">Detalle del usuario</div>`;
+                    contentHtml += `<div class="report-detail-list">${document.getElementById('report-user-detail-body').innerHTML}</div>`;
+                } else {
+                    // Tabla de todos los usuarios
+                    const usersTempDiv = document.createElement('div');
+                    usersTempDiv.innerHTML = `<table><tbody>${document.getElementById('report-users-table-body').innerHTML}</tbody></table>`;
+                    contentHtml += `<div class="report-section-title">Informe por Usuarios</div>`;
+                    contentHtml += `<table class="report-table users-table"><thead><tr><th>Usuario</th><th>Aut</th><th>Den</th><th>Total</th><th>% Aut</th></tr></thead><tbody>${usersTempDiv.querySelector('tbody').innerHTML}</tbody></table>`;
+                }
+            }
+
+            const content = document.createElement('div');
+            content.innerHTML = contentHtml;
             printArea.appendChild(content);
 
             const originalTitle = document.title;
