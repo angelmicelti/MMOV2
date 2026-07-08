@@ -1286,220 +1286,139 @@
 
         function initScanner() {
             html5QrcodeScanner = new Html5Qrcode("reader");
+            // Rellenar el selector de camaras en cuanto el scanner esta listo
+            populateCameraSelector().catch(() => {});
             if (document.getElementById('view-scanner').classList.contains('hidden') === false) {
                 startScanner();
             }
         }
 
+        // Variable para evitar llamadas concurrentes a startScanner
+        let _startScannerInFlight = false;
+
         window.startScanner = async () => {
             if (!html5QrcodeScanner) return;
+            // Evitar re-entrada: si ya estamos iniciando, no hacer nada
+            if (_startScannerInFlight) {
+                console.log("startScanner ya en curso, ignorando llamada duplicada");
+                return;
+            }
+            _startScannerInFlight = true;
             document.getElementById('restart-scanner-btn').classList.add('hidden');
 
-            // Verificar soporte de API de media devices
+            // Verificar soporte
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                console.error("navigator.mediaDevices no soportado");
+                _startScannerInFlight = false;
                 document.getElementById('restart-scanner-btn').classList.remove('hidden');
-                showToast("Este navegador no soporta acceso a la camara. Usa Chrome, Firefox o Safari recientes.");
+                showToast("Este navegador no soporta acceso a la camara.");
                 return;
             }
 
-            // Detectar si es movil
-            const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
-                || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
-            console.log("Dispositivo detectado como:", isMobile ? "MOVIL" : "PC/DESKTOP");
+            // Refrescar el selector de camaras por si han cambiado
+            try { await populateCameraSelector(); } catch(e) {}
 
-            // Asegurar que el selector de camaras este relleno (necesita permiso concedido)
-            await populateCameraSelector();
-
-            // qrbox adaptativo
+            // Configuracion simple similar a la version original que funcionaba
             const qrboxFn = (viewfinderWidth, viewfinderHeight) => {
                 const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
                 const size = Math.max(200, Math.floor(minEdge * 0.7));
                 return { width: size, height: size };
             };
 
-            const baseConfig = {
-                fps: 15,
+            const config = {
+                fps: 10,
                 qrbox: qrboxFn,
-                aspectRatio: 1.333,
-                disableFlip: false,
-                experimentalFeatures: {
-                    useBarCodeDetectorIfSupported: true
-                },
-                videoConstraints: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
+                aspectRatio: 1.0,
+                disableFlip: false
             };
 
-            // Detener el scanner previo si estaba activo
-            const safeStop = async () => {
-                try {
-                    if (html5QrcodeScanner) {
-                        const isActive = html5QrcodeScanner.isScanning
-                            || html5QrcodeScanner.getState?.() === 2
-                            || html5QrcodeScanner.isScanning === true;
-                        if (isActive) {
-                            await html5QrcodeScanner.stop();
-                        }
-                    }
-                } catch (e) {
-                    console.log("stop() previo (ignorado):", e.message || e);
+            // Determinar constraints segun seleccion del usuario
+            const select = document.getElementById('camera-select');
+            const selectedValue = select ? select.value : 'auto';
+
+            let cameraConstraints;
+            let cameraLabel = 'auto';
+
+            if (selectedValue && selectedValue !== 'auto') {
+                // Usuario eligio una camara concreta por deviceId
+                cameraConstraints = { deviceId: { exact: selectedValue } };
+                const dev = availableVideoDevices.find(d => d.deviceId === selectedValue);
+                cameraLabel = dev ? (dev.label || 'dispositivo seleccionado') : 'dispositivo seleccionado';
+            } else {
+                // Auto: en movil trasera (environment), en PC cualquier camara (sin facingMode estricto)
+                const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
+                    || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
+                if (isMobile) {
+                    cameraConstraints = { facingMode: "environment" };
+                    cameraLabel = 'trasera (movil)';
+                } else {
+                    // PC: sin facingMode para que el navegador elija la camara por defecto
+                    // (suele ser la webcam real, no la virtual)
+                    cameraConstraints = { facingMode: "user" };
+                    cameraLabel = 'frontal (PC)';
                 }
-                try {
-                    if (html5QrcodeScanner) html5QrcodeScanner.clear();
-                } catch (e) {
-                    console.log("clear() previo (ignorado):", e.message || e);
-                }
+            }
+
+            // IMPORTANTE: No llamar a stop() previamente si isScanningActive es false.
+            // Eso es lo que rompia el scanner en la version anterior (bucle infinito).
+            // Solo detener si realmente esta activo.
+            const doStart = () => {
+                return html5QrcodeScanner.start(cameraConstraints, config, onScanSuccess, onScanFailure);
             };
 
-            // Filtrar camaras virtuales (Mirametrix, OBS Virtual Camera, etc.)
-            // que muestran pantallas negras o avatares en lugar de la webcam real
-            const isVirtualCamera = (label) => {
-                if (!label) return false;
-                const l = label.toLowerCase();
-                return l.includes('virtual') || l.includes('mirametrix') || l.includes('obs ')
-                    || l.includes('manycam') || l.includes('snap') || l.includes('droidcam')
-                    || l.includes('ivcam') || l.includes('camo ');
-            };
-
-            // Construir lista de camaras a probar segun seleccion del usuario
-            const buildCameraCandidates = async () => {
-                const select = document.getElementById('camera-select');
-                const selectedValue = select ? select.value : 'auto';
-                const candidates = [];
-
-                if (selectedValue && selectedValue !== 'auto') {
-                    // Usuario eligio una camara concreta: usar esa primera
-                    const dev = availableVideoDevices.find(d => d.deviceId === selectedValue);
-                    if (dev) {
-                        candidates.push({
-                            label: dev.label || `dispositivo ${dev.deviceId.substring(0, 8)}`,
-                            constraints: { deviceId: { exact: dev.deviceId } }
-                        });
-                    }
-                }
-
-                if (selectedValue === 'auto' || !selectedValue) {
-                    // Auto: priorizar camaras reales segun dispositivo
-                    if (isMobile) {
-                        candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
-                        candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
-                    } else {
-                        // PC: preferir facingMode user, luego environment
-                        candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
-                        candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
-                    }
-                }
-
-                // Fallback: enumerar dispositivos y anadirlos (excepto los virtuales y los ya anadidos)
-                // Esto sirve si facingMode no funciona y la camara elegida no esta disponible
-                try {
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
-                    // Primero camaras reales (no virtuales)
-                    videoDevices.forEach((d) => {
-                        if (!isVirtualCamera(d.label)) {
-                            const alreadyAdded = candidates.some(c =>
-                                c.constraints.deviceId && c.constraints.deviceId.exact === d.deviceId
-                            );
-                            if (!alreadyAdded) {
-                                candidates.push({
-                                    label: d.label || `dispositivo ${d.deviceId.substring(0, 8)}`,
-                                    constraints: { deviceId: { exact: d.deviceId } }
-                                });
-                            }
-                        }
-                    });
-                    // Luego camaras virtuales como ultimo recurso
-                    videoDevices.forEach((d) => {
-                        if (isVirtualCamera(d.label)) {
-                            const alreadyAdded = candidates.some(c =>
-                                c.constraints.deviceId && c.constraints.deviceId.exact === d.deviceId
-                            );
-                            if (!alreadyAdded) {
-                                candidates.push({
-                                    label: d.label || `dispositivo virtual ${d.deviceId.substring(0, 8)}`,
-                                    constraints: { deviceId: { exact: d.deviceId } }
-                                });
-                            }
-                        }
-                    });
-                } catch (e) {
-                    console.warn("No se pudo enumerar dispositivos:", e);
-                }
-                return candidates;
-            };
+            console.log(`Iniciando camara: ${cameraLabel}`);
 
             try {
-                await safeStop();
-                const candidates = await buildCameraCandidates();
-                console.log(`Probar ${candidates.length} camaras en orden:`, candidates.map(c => c.label).join(', '));
-
-                let lastError = null;
-                let started = false;
-                let startedLabel = null;
-
-                for (const candidate of candidates) {
+                // Si el scanner ya esta activo, detenerlo primero (caso: cambio de camara)
+                if (html5QrcodeScanner.isScanning === true) {
                     try {
-                        console.log(`Intentando iniciar camara: ${candidate.label}`);
-                        const config = { ...baseConfig, videoConstraints: { ...baseConfig.videoConstraints, ...candidate.constraints } };
-                        await html5QrcodeScanner.start(candidate.constraints, config, onScanSuccess, onScanFailure);
-                        console.log(`Camara iniciada OK: ${candidate.label}`);
-                        started = true;
-                        startedLabel = candidate.label;
-                        lastUsedCameraConstraints = candidate.constraints;
-                        break;
-                    } catch (err) {
-                        console.warn(`Fallo camara ${candidate.label}:`, err.name || err.code, err.message || '');
-                        lastError = err;
-                        await safeStop();
+                        await html5QrcodeScanner.stop();
+                    } catch (e) {
+                        console.log("stop() previo (ignorado):", e.message || e);
                     }
                 }
 
-                if (started) {
-                    isScanningActive = true;
-                    console.log("Camara iniciada correctamente. isScanningActive =", isScanningActive);
+                await doStart();
+                isScanningActive = true;
+                _startScannerInFlight = false;
+                console.log(`Camara iniciada OK: ${cameraLabel}`);
 
-                    // Mostrar nombre de la camara activa en la UI
-                    const activeCamEl = document.getElementById('active-camera-name');
-                    if (activeCamEl) {
-                        activeCamEl.textContent = `📷 Cámara activa: ${startedLabel}`;
-                    }
-
-                    // Verificar que el video este realmente reproduciendose
-                    setTimeout(() => {
-                        const readerEl = document.getElementById('reader');
-                        const videoEl = readerEl ? readerEl.querySelector('video') : null;
-                        if (videoEl) {
-                            console.log("Estado del video:", {
-                                videoWidth: videoEl.videoWidth,
-                                videoHeight: videoEl.videoHeight,
-                                readyState: videoEl.readyState,
-                                paused: videoEl.paused,
-                                clientWidth: videoEl.clientWidth,
-                                clientHeight: videoEl.clientHeight
-                            });
-                            if (videoEl.paused) {
-                                console.log("Video pausado, forzando play()...");
-                                videoEl.play().catch(e => console.warn("No se pudo forzar play:", e));
-                            }
-                        } else {
-                            console.warn("No se encontro elemento <video> dentro de #reader");
-                        }
-                    }, 500);
-                } else {
-                    throw lastError || new Error("No se pudo iniciar ninguna camara");
+                // Mostrar nombre de la camara activa
+                const activeCamEl = document.getElementById('active-camera-name');
+                if (activeCamEl) {
+                    activeCamEl.textContent = `Camara activa: ${cameraLabel}`;
                 }
             } catch (err) {
-                console.error("Error al iniciar camara:", err);
+                _startScannerInFlight = false;
+                console.error(`Error al iniciar camara ${cameraLabel}:`, err.name, err.message);
+
+                // Si la camara seleccionada fallo, probar con la otra (solo en auto)
+                if (selectedValue === 'auto' || !selectedValue) {
+                    const fallbackConstraints = (cameraConstraints.facingMode === "environment")
+                        ? { facingMode: "user" }
+                        : { facingMode: "environment" };
+                    console.log("Fallback: probando camara alternativa");
+                    try {
+                        if (html5QrcodeScanner.isScanning === true) {
+                            try { await html5QrcodeScanner.stop(); } catch(e) {}
+                        }
+                        await html5QrcodeScanner.start(fallbackConstraints, config, onScanSuccess, onScanFailure);
+                        isScanningActive = true;
+                        console.log("Camara alternativa iniciada OK");
+                        const activeCamEl = document.getElementById('active-camera-name');
+                        if (activeCamEl) activeCamEl.textContent = `Camara activa: alternativa`;
+                        return;
+                    } catch (err2) {
+                        console.error("Fallback tambien fallo:", err2.name, err2.message);
+                    }
+                }
+
                 document.getElementById('restart-scanner-btn').classList.remove('hidden');
                 let msg = "No se pudo acceder a la camara.";
                 if (err) {
-                    if (err.name === 'NotAllowedError' || err.code === 'NotAllowedError') {
-                        msg = "Permiso de camara denegado. Activa el permiso en el navegador (icono de camara en la barra de direcciones).";
-                    } else if (err.name === 'NotFoundError' || err.code === 'NotFoundError' || err.name === 'OverconstrainedError') {
-                        msg = "No se encontro ninguna camara compatible conectada.";
+                    if (err.name === 'NotAllowedError') {
+                        msg = "Permiso de camara denegado. Activa el permiso en el navegador.";
+                    } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+                        msg = "No se encontro ninguna camara compatible.";
                     } else if (err.name === 'NotReadableError') {
                         msg = "La camara esta siendo usada por otra aplicacion. Cierrala e intenta de nuevo.";
                     } else if (err.message) {
