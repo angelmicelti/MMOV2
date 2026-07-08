@@ -718,7 +718,16 @@
             measurementId: "G-HND827Z5CW"
         };
         
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
+        // Parsear __firebase_config con try/catch por si esta malformado (fallback a userFirebaseConfig)
+        let firebaseConfig;
+        try {
+            firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_config)
+                ? JSON.parse(__firebase_config)
+                : userFirebaseConfig;
+        } catch (e) {
+            console.warn("__firebase_config malformado, usando configuracion hardcoded:", e.message);
+            firebaseConfig = userFirebaseConfig;
+        }
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
@@ -920,6 +929,9 @@
                                 }
                             }
                             showSetupAdminScreen();
+                        }).catch(e => {
+                            console.warn('scanOtherAppPaths fallo:', e);
+                            showSetupAdminScreen();
                         });
                     } else if (!currentAppUser) {
                         showLoginScreen();
@@ -1027,20 +1039,24 @@
         function showLoginScreen() {
             document.getElementById('main-header').style.display = 'none';
             document.getElementById('main-nav').style.display = 'none';
-            
+
             document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
             document.getElementById('view-login').classList.remove('hidden');
-            
+
             document.getElementById('login-title').textContent = "Iniciar Sesión";
             document.getElementById('login-subtitle').textContent = "Introduce tus credenciales";
-            
+
             document.getElementById('form-setup').classList.add('hidden');
             document.getElementById('form-register').classList.add('hidden');
             document.getElementById('form-login').classList.remove('hidden');
-            
+
             // Apagar escáner por si acaso
             stopScannerVisually();
         }
+        // Exponer en window porque el script es type="module" (las function declarations
+        // no se auto-asignan al global object) y el boton "Volver al Login" usa onclick inline.
+        window.showLoginScreen = showLoginScreen;
+        window.showSetupAdminScreen = showSetupAdminScreen;
 
         window.showRegisterScreen = () => {
             document.getElementById('login-title').textContent = "Registro";
@@ -1156,7 +1172,9 @@
 
             const reportGroupSelect = document.getElementById('report-group');
             if (role === 'tutor') {
-                reportGroupSelect.innerHTML = `<option value="${currentAppUser.tutorGroup}">${currentAppUser.tutorGroup}</option>`;
+                // Fallback a '(sin grupo)' si tutorGroup falta (datos legacy)
+                const tg = currentAppUser.tutorGroup || '(sin grupo)';
+                reportGroupSelect.innerHTML = `<option value="${tg}">${tg}</option>`;
                 reportGroupSelect.disabled = true;
             } else {
                 reportGroupSelect.disabled = false;
@@ -1227,21 +1245,28 @@
                 let extraInfo = "";
 
                 if (u.role === 'admin') { badgeClass = "bg-purple-100 text-purple-800"; badgeText = "Admin"; }
-                if (u.role === 'tutor') { badgeClass = "bg-blue-100 text-blue-800"; badgeText = "Tutor"; extraInfo = `<span class="text-[10px] block mt-1 text-gray-500">${u.tutorGroup}</span>`; }
+                if (u.role === 'tutor') { badgeClass = "bg-blue-100 text-blue-800"; badgeText = "Tutor"; extraInfo = `<span class="text-[10px] block mt-1 text-gray-500">${u.tutorGroup || '(sin grupo)'}</span>`; }
+
+                // Escape para onclick inline (backslash-escape de comillas)
+                const escapeJs = (str) => String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+                const safeId = escapeJs(u.id);
+                const safeName = escapeJs(u.name);
+                // Escape para display HTML
+                const escapeHtml = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
                 const row = `
                     <tr class="hover:bg-gray-50">
                         <td class="p-3">
-                            <div class="font-medium text-gray-800">${u.name}</div>
-                            <div class="text-xs text-gray-400">@${u.username}</div>
+                            <div class="font-medium text-gray-800">${escapeHtml(u.name)}</div>
+                            <div class="text-xs text-gray-400">@${escapeHtml(u.username)}</div>
                         </td>
                         <td class="p-3">
                             <span class="${badgeClass} px-2 py-1 rounded text-xs font-bold">${badgeText}</span>
                             ${extraInfo}
                         </td>
                         <td class="p-3 text-right">
-                            <button onclick="editUser('${u.id}')" class="text-blue-500 hover:text-blue-700 p-2"><i class="fa-solid fa-pen"></i></button>
-                            <button onclick="confirmDeleteUser('${u.id}', '${u.name}')" class="text-red-500 hover:text-red-700 p-2" ${u.id === currentAppUser.id ? 'disabled opacity-50' : ''}><i class="fa-solid fa-trash-can"></i></button>
+                            <button onclick="editUser('${safeId}')" class="text-blue-500 hover:text-blue-700 p-2"><i class="fa-solid fa-pen"></i></button>
+                            <button onclick="confirmDeleteUser('${safeId}', '${safeName}')" class="text-red-500 hover:text-red-700 p-2" ${u.id === currentAppUser.id ? 'disabled opacity-50' : ''}><i class="fa-solid fa-trash-can"></i></button>
                         </td>
                     </tr>
                 `;
@@ -1602,12 +1627,32 @@
 
         function stopScannerVisually() {
             if(html5QrcodeScanner && isScanningActive) {
+                // Setear isScanningActive = false SINCRONICAMENTE antes de stop() para evitar
+                // race conditions: si el usuario cambia de pestana y vuelve rapido, el flag
+                // ya esta en false y startScanner podra reiniciar la camara.
+                isScanningActive = false;
                 try {
-                    html5QrcodeScanner.stop().then(() => {
+                    const stopPromise = html5QrcodeScanner.stop();
+                    if (stopPromise && typeof stopPromise.then === 'function') {
+                        stopPromise
+                            .then(() => {
+                                document.getElementById('restart-scanner-btn').classList.remove('hidden');
+                            })
+                            .catch(e => {
+                                console.log("stop() previo (ignorado):", e.message || e);
+                            })
+                            .finally(() => {
+                                // Asegurar que isScanningActive queda false incluso si stop() rechaza
+                                isScanningActive = false;
+                            });
+                    } else {
+                        // stop() era sincrono (algunas versiones antiguas)
                         document.getElementById('restart-scanner-btn').classList.remove('hidden');
-                        isScanningActive = false;
-                    }).catch(e => {});
-                } catch(e) {}
+                    }
+                } catch(e) {
+                    console.log("stopScannerVisually exception (ignorado):", e.message || e);
+                    isScanningActive = false;
+                }
             }
         }
 
@@ -1620,17 +1665,22 @@
 
         function onScanSuccess(decodedText) {
             if (!isScanningActive) return;
+            // Marcar inactividad SINCRONICAMENTE para evitar que onScanSuccess dispare
+            // de nuevo (puede que el mismo QR o uno distinto) mientras stop() esta en vuelo.
+            isScanningActive = false;
             const cleaned = String(decodedText || '').trim();
             console.log("QR decodificado:", JSON.stringify(cleaned), "longitud:", cleaned.length);
 
             const student = allStudents.find(s => s.id === cleaned);
             if (student) {
                 // ANTIESPAM: si es el mismo alumno y han pasado menos de 10s, ignorar
+                // (restaurar isScanningActive porque no vamos a mostrar la vista de accion)
                 const now = Date.now();
                 if (lastScannedId === student.id && (now - lastScanTimestamp) < SCAN_COOLDOWN_MS) {
                     const remaining = Math.ceil((SCAN_COOLDOWN_MS - (now - lastScanTimestamp)) / 1000);
                     console.log(`Mismo alumno escaneado hace ${Math.round((now - lastScanTimestamp)/1000)}s. Ignorando (quedan ${remaining}s)`);
-                    return; // No procesar, seguir escaneando
+                    isScanningActive = true; // restaurar para seguir escaneando
+                    return;
                 }
                 // Registrar escaneo
                 lastScannedId = student.id;
@@ -1643,7 +1693,6 @@
             } else {
                 console.log("ID no encontrado. IDs disponibles (primeros 3):",
                     allStudents.slice(0, 3).map(s => ({ id: s.id, len: s.id.length })));
-                isScanningActive = false;
                 showToast("Carnet no reconocido. ID: " + cleaned.substring(0, 8) + "...");
                 setTimeout(() => { isScanningActive = true; }, 2000);
             }
@@ -1977,8 +2026,9 @@
             if (!container) return;
             if (currentAppUser?.role === 'tutor') {
                 // Tutores: solo ven su grupo, no pueden elegir otros
-                container.innerHTML = `<span class="text-xs text-gray-500 italic">Tu grupo: ${currentAppUser.tutorGroup}</span>`;
-                _selectedUnits = new Set([currentAppUser.tutorGroup]);
+                const tg = currentAppUser.tutorGroup || '(sin grupo)';
+                container.innerHTML = `<span class="text-xs text-gray-500 italic">Tu grupo: ${tg}</span>`;
+                _selectedUnits = new Set([tg]);
                 _allUnitsSelected = false;
                 return;
             }
@@ -2177,19 +2227,24 @@
 
             let html = '<ul class="divide-y divide-gray-100">';
             filtered.forEach(s => {
-                const safeName = s.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
-                const safeId = s.id.replace(/'/g, "\\'");
+                // Escape para usar dentro de onclick="func('...')" (strings JS):
+                // backslash antes de comillas simples y dobles, y backslash del propio backslash
+                const escapeJs = (str) => String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+                const safeName = escapeJs(s.name);
+                const safeId = escapeJs(s.id);
+                // Escape para mostrar texto en HTML (evita inyeccion)
+                const escapeHtml = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                 html += `
                     <li class="py-2 flex justify-between items-center text-sm">
                         <div>
-                            <span class="font-medium text-gray-700">${s.name}</span>
-                            <span class="block text-xs text-gray-400">${s.course}</span>
+                            <span class="font-medium text-gray-700">${escapeHtml(s.name)}</span>
+                            <span class="block text-xs text-gray-400">${escapeHtml(s.course)}</span>
                         </div>
                         <div class="flex items-center gap-2">
                             <button onclick="showQRPreview('${safeId}', '${safeName}')" class="text-blue-500 hover:text-blue-700 transition-colors p-2" title="Ver QR en pantalla">
                                 <i class="fa-solid fa-qrcode"></i>
                             </button>
-                            <button onclick="confirmDeleteStudent('${s.id}', '${safeName}')" class="text-red-400 hover:text-red-600 transition-colors p-2"><i class="fa-solid fa-trash-can"></i></button>
+                            <button onclick="confirmDeleteStudent('${safeId}', '${safeName}')" class="text-red-400 hover:text-red-600 transition-colors p-2"><i class="fa-solid fa-trash-can"></i></button>
                         </div>
                     </li>
                 `;
@@ -2434,6 +2489,11 @@
                         }, 1000);
                     });
                 });
+            }).catch(e => {
+                console.error('Error generando carnets QR:', e);
+                printArea.innerHTML = '';
+                document.title = originalTitle;
+                showToast('Error al generar los carnets QR.');
             });
         };
 
@@ -2603,9 +2663,14 @@
                     const canDelete = currentAppUser.role === 'admin';
 
                     sortedStats.forEach(stat => {
-                        const safeName = stat.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+                        // Escape para onclick inline (backslash-escape de comillas)
+                        const escapeJs = (str) => String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+                        const safeName = escapeJs(stat.name);
+                        const safeId = escapeJs(stat.id);
+                        // Escape para display HTML
+                        const escapeHtml = (str) => String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                         let alertClass = (stat.auth >= 3 && timeFilter === 'today') ? "text-red-600 font-bold" : "";
-                        const deleteBtnHtml = canDelete ? `<button onclick="confirmDeleteStudentLogs('${stat.id}', '${safeName}')" class="text-red-400 hover:text-red-600 p-1"><i class="fa-solid fa-trash-can"></i></button>` : '';
+                        const deleteBtnHtml = canDelete ? `<button onclick="confirmDeleteStudentLogs('${safeId}', '${safeName}')" class="text-red-400 hover:text-red-600 p-1"><i class="fa-solid fa-trash-can"></i></button>` : '';
 
                         tbody.insertAdjacentHTML('beforeend', `
                             <tr class="border-b border-gray-50 last:border-0 hover:bg-gray-50">
