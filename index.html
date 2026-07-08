@@ -1200,7 +1200,6 @@
             document.getElementById('restart-scanner-btn').classList.add('hidden');
 
             // qrbox adaptativo: 70% del min(ancho, alto) del video, con minimo 200x200
-            // Esto evita problemas en pantallas pequenas y mejora el encuadre
             const qrboxFn = (viewfinderWidth, viewfinderHeight) => {
                 const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
                 const size = Math.max(200, Math.floor(minEdge * 0.7));
@@ -1216,18 +1215,73 @@
                     useBarCodeDetectorIfSupported: true
                 },
                 videoConstraints: {
-                    facingMode: { ideal: "environment" },
                     width: { ideal: 1280 },
                     height: { ideal: 720 }
                 }
             };
 
-            html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
-                .then(() => { isScanningActive = true; })
+            // Estrategia de fallback para camara:
+            // 1. Probar camera trasera (environment) - ideal en movil
+            // 2. Si falla, probar cualquier camara (facingMode: 'user' o sin facingMode) - PC
+            // 3. Si falla, enumerar dispositivos y usar el primero que sea videoinput
+            const startWithEnvironment = () => {
+                const envConfig = { ...config, videoConstraints: { ...config.videoConstraints, facingMode: { ideal: "environment" } } };
+                return html5QrcodeScanner.start({ facingMode: { ideal: "environment" } }, envConfig, onScanSuccess, onScanFailure);
+            };
+
+            const startWithAnyCamera = () => {
+                console.log("Fallback: probando cualquier camara disponible (PC)");
+                return html5QrcodeScanner.start(
+                    { facingMode: { ideal: "user" } },
+                    config,
+                    onScanSuccess,
+                    onScanFailure
+                );
+            };
+
+            const startWithDeviceId = () => {
+                console.log("Fallback: enumerando dispositivos de video");
+                return navigator.mediaDevices.enumerateDevices()
+                    .then(devices => {
+                        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                        if (videoDevices.length === 0) {
+                            throw new Error("No se encontraron camaras conectadas");
+                        }
+                        console.log(`Camara encontrada: ${videoDevices[0].label || 'dispositivo ' + videoDevices[0].deviceId.substring(0, 8)}`);
+                        return html5QrcodeScanner.start(
+                            { deviceId: { exact: videoDevices[0].deviceId } },
+                            config,
+                            onScanSuccess,
+                            onScanFailure
+                        );
+                    });
+            };
+
+            startWithEnvironment()
                 .catch(err => {
-                    console.error("Error al iniciar camara:", err);
+                    console.warn("Camara trasera no disponible:", err.code || err.name, err.message);
+                    return startWithAnyCamera();
+                })
+                .catch(err => {
+                    console.warn("Camara frontal no disponible:", err.code || err.name, err.message);
+                    return startWithDeviceId();
+                })
+                .then(() => {
+                    isScanningActive = true;
+                    console.log("Camara iniciada correctamente");
+                })
+                .catch(err => {
+                    console.error("Error al iniciar camara tras todos los intentos:", err);
                     document.getElementById('restart-scanner-btn').classList.remove('hidden');
-                    showToast("No se pudo acceder a la camara. Revisa permisos.");
+                    let msg = "No se pudo acceder a la camara.";
+                    if (err && (err.name === 'NotAllowedError' || err.code === 'NotAllowedError')) {
+                        msg = "Permiso de camara denegado. Activa el permiso en el navegador.";
+                    } else if (err && (err.name === 'NotFoundError' || err.code === 'NotFoundError')) {
+                        msg = "No se encontro ninguna camara conectada.";
+                    } else if (err && err.message) {
+                        msg = "Error de camara: " + err.message;
+                    }
+                    showToast(msg);
                 });
         };
 
@@ -1496,36 +1550,38 @@
                 @page { size: A4; margin: 8mm; }
                 * { box-sizing: border-box; }
                 html, body {
-                    height: 100%;
                     margin: 0;
                     padding: 0;
                 }
                 /* OVERRIDE del CSS global: #print-area tiene position:absolute;top:0
-                   que ancla el contenido arriba e impide el centrado vertical.
-                   Lo cambiamos a position:static + flex column con justify-content:center
-                   y altura fija en mm (100vh no es fiable en impresion). */
+                   que ancla el contenido arriba. Lo cambiamos a static para que
+                   respete el flujo natural y los saltos de pagina. */
                 #print-area {
                     position: static !important;
                     top: auto !important;
                     left: auto !important;
                     width: 100% !important;
-                    display: flex !important;
-                    flex-direction: column;
-                    justify-content: center;
-                    /* A4 = 297mm alto. Con margen 8mm arriba + 8mm abajo = 281mm utiles.
-                       Usamos min-height (no height) para que crezca si hay >8 tarjetas. */
-                    min-height: 281mm;
                     background: white;
                 }
-                /* Contenedor de tarjetas: centra horizontalmente y distribuye filas */
+                /* Cada .qr-print-page es UNA pagina fisica A4.
+                   Altura fija = 281mm (A4 297mm - 2*8mm margen) para que el
+                   centrado vertical funcione y el salto de pagina sea exacto. */
                 .qr-print-page {
                     display: flex;
                     flex-wrap: wrap;
                     width: 100%;
+                    height: 281mm;
                     gap: 6mm;
-                    align-items: stretch;
+                    align-items: center;
                     align-content: center;
                     justify-content: center;
+                    break-after: page;
+                    page-break-after: always;
+                }
+                /* La ultima pagina no fuerza salto (evita hoja en blanco final) */
+                .qr-print-page:last-child {
+                    break-after: auto;
+                    page-break-after: auto;
                 }
                 .qr-card {
                     width: 85.6mm;
@@ -1540,18 +1596,7 @@
                     background: #fafafa;
                     break-inside: avoid;
                     page-break-inside: avoid;
-                    page-break-after: auto;
                     position: relative;
-                }
-                /* Cada 8 tarjetas (4 filas de 2), forzar salto de pagina */
-                .qr-card:nth-child(8n) {
-                    page-break-after: always;
-                    break-after: page;
-                }
-                /* La ultima tarjeta no debe forzar salto (evita pagina en blanco final) */
-                .qr-card:last-child {
-                    page-break-after: auto;
-                    break-after: auto;
                 }
                 /* Lado izquierdo: informacion del alumno */
                 .qr-card-info {
@@ -1615,18 +1660,23 @@
             `;
             printArea.appendChild(style);
 
-            const pageWrapper = document.createElement('div');
-            pageWrapper.className = 'qr-print-page';
-
-            // Generar cada tarjeta y su QR
-            // Layout horizontal: info (izq) + QR (der)
-            // QR de 40mm (~151px a 96dpi) con quiet zone de 4 modulos
-            // 40mm deja espacio suficiente en la tarjeta de 85.6mm para la info
+            // Generar tarjetas agrupadas en paginas de 8 (2 columnas x 4 filas)
+            // Cada pagina es un div .qr-print-page independiente con altura fija
+            // para que el centrado vertical funcione por pagina y los saltos de
+            // pagina sean exactos.
             const qrPromises = [];
-            // Tamano QR en pixels: 40mm a 96dpi = 40 * 96 / 25.4 ≈ 151px
-            // Usamos 150 para tener margen
             const QR_SIZE_PX = 150;
-            studentsToPrint.forEach(s => {
+            const CARDS_PER_PAGE = 8;
+            let currentPage = null;
+
+            studentsToPrint.forEach((s, idx) => {
+                // Crear nueva pagina al inicio o cada CARDS_PER_PAGE tarjetas
+                if (idx % CARDS_PER_PAGE === 0) {
+                    currentPage = document.createElement('div');
+                    currentPage.className = 'qr-print-page';
+                    printArea.appendChild(currentPage);
+                }
+
                 const card = document.createElement('div');
                 card.className = 'qr-card';
 
@@ -1662,7 +1712,7 @@
                 card.appendChild(infoDiv);
                 card.appendChild(qrContainer);
                 card.appendChild(cutBR);
-                pageWrapper.appendChild(card);
+                currentPage.appendChild(card);
 
                 // Generar QR a canvas pixel-perfect (cuadrado perfecto)
                 const promise = new Promise((resolve) => {
@@ -1677,7 +1727,6 @@
                 });
                 qrPromises.push(promise);
             });
-            printArea.appendChild(pageWrapper);
 
             // Esperar a que TODOS los QR esten renderizados antes de imprimir
             const originalTitle = document.title;
