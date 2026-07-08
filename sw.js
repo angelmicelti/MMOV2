@@ -1,4 +1,4 @@
-const CACHE_NAME = 'qr-scanner-v30';
+const CACHE_NAME = 'qr-scanner-v31';
 const urlsToCache = [
     '/',
     '/index.html',
