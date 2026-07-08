@@ -1470,39 +1470,43 @@
             printArea.innerHTML = '';
 
             // CSS de impresion robusto:
-            // - Usa layout flex explicito en lugar de grid (mas predecible en print)
+            // - Layout flex con gap amplio (20px) para separar claramente las cards
             // - box-sizing: border-box para que padding no cause overflow
+            // - Borde solido grueso + fondo gris muy claro para distinguir cada carnet
+            // - Linea de corte con tijeras entre cards para facilitar recorte manual
             // - CSS especifico para la <table> que genera qrcodejs internamente
             // - Salto de pagina controlado cada 4 cards (2 filas x 2 columnas)
-            // - break-inside: avoid (sintaxis moderna) + page-break-inside: avoid (legacy)
             const style = document.createElement('style');
             style.innerHTML = `
-                @page { size: A4; margin: 1cm; }
+                @page { size: A4; margin: 1.2cm; }
                 * { box-sizing: border-box; }
                 .qr-print-page {
                     display: flex;
                     flex-wrap: wrap;
                     width: 100%;
-                    gap: 8px;
+                    gap: 24px;
                     align-items: stretch;
                     align-content: flex-start;
+                    justify-content: space-between;
                 }
                 .qr-card {
-                    width: calc(50% - 4px);
-                    min-height: 320px;
-                    max-height: 340px;
-                    border: 2px dashed #aaa;
-                    border-radius: 8px;
-                    padding: 14px;
+                    width: calc(50% - 12px);
+                    min-height: 300px;
+                    max-height: 320px;
+                    border: 2px solid #1f2937;
+                    border-radius: 10px;
+                    padding: 16px;
                     text-align: center;
                     display: flex;
                     flex-direction: column;
                     justify-content: center;
                     align-items: center;
                     overflow: hidden;
+                    background: #fafafa;
                     break-inside: avoid;
                     page-break-inside: avoid;
                     page-break-after: auto;
+                    position: relative;
                 }
                 /* Cada 4 cards (2 filas), forzar salto de pagina tras la 4ta, 8va, etc */
                 .qr-card:nth-child(4n) {
@@ -1525,17 +1529,20 @@
                 }
                 .qr-card-course {
                     font-size: 12px;
-                    color: #666;
-                    margin-bottom: 10px;
-                    font-weight: 500;
+                    color: #555;
+                    margin-bottom: 12px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
                 }
                 .qr-container {
                     background: white;
-                    padding: 10px;
-                    border: 1px solid #ddd;
-                    border-radius: 6px;
+                    padding: 12px;
+                    border: 2px solid #1f2937;
+                    border-radius: 8px;
                     line-height: 0;
                     display: inline-block;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
                 }
                 /* qrcodejs genera una <table> internamente; hay que resetear su CSS */
                 .qr-container table {
@@ -1564,6 +1571,16 @@
                     max-width: 100%;
                     height: auto;
                 }
+                /* Marca de corte con tijeras en las esquinas para facilitar el recorte */
+                .qr-cut-mark {
+                    position: absolute;
+                    font-size: 9px;
+                    color: #999;
+                    font-family: sans-serif;
+                    pointer-events: none;
+                }
+                .qr-cut-mark-tl { top: 4px; left: 6px; }
+                .qr-cut-mark-br { bottom: 4px; right: 6px; }
             `;
             printArea.appendChild(style);
 
@@ -1575,6 +1592,15 @@
             studentsToPrint.forEach(s => {
                 const card = document.createElement('div');
                 card.className = 'qr-card';
+
+                // Marcas de corte con tijeras en las esquinas opuestas
+                const cutTL = document.createElement('div');
+                cutTL.className = 'qr-cut-mark qr-cut-mark-tl';
+                cutTL.textContent = '✂ - - -';
+                const cutBR = document.createElement('div');
+                cutBR.className = 'qr-cut-mark qr-cut-mark-br';
+                cutBR.textContent = '- - - ✂';
+
                 const titleEl = document.createElement('div');
                 titleEl.className = 'qr-card-title';
                 titleEl.textContent = s.name;
@@ -1584,9 +1610,11 @@
                 const qrContainer = document.createElement('div');
                 qrContainer.className = 'qr-container';
 
+                card.appendChild(cutTL);
                 card.appendChild(titleEl);
                 card.appendChild(courseEl);
                 card.appendChild(qrContainer);
+                card.appendChild(cutBR);
                 pageWrapper.appendChild(card);
 
                 // Generar QR y devolver una promesa que se resuelve cuando el QR esta en el DOM
@@ -1594,8 +1622,8 @@
                     try {
                         new QRCode(qrContainer, {
                             text: s.id,
-                            width: 180,
-                            height: 180,
+                            width: 170,
+                            height: 170,
                             colorDark: "#000000",
                             colorLight: "#ffffff",
                             correctLevel: QRCode.CorrectLevel.H
