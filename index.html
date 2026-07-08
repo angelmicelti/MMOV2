@@ -1988,12 +1988,17 @@
                 btn.type = 'button';
                 btn.dataset.unit = g;
                 btn.textContent = g;
+                // Clase base del boton (sin estado selected/no-selected)
                 btn.className = 'unit-btn px-3 py-1.5 rounded-full text-xs font-bold border transition-colors';
                 // Estado inicial: si _selectedUnits esta vacio, todas seleccionadas
                 const isSelected = _selectedUnits.size === 0 || _selectedUnits.has(g);
-                btn.classList.add(isSelected
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50');
+                // IMPORTANTE: classList.add requiere cada clase como argumento separado
+                // (no acepta strings con espacios)
+                if (isSelected) {
+                    btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+                } else {
+                    btn.classList.add('bg-white', 'text-gray-500', 'border-gray-300', 'hover:bg-gray-50');
+                }
                 btn.onclick = () => toggleUnitButton(g);
                 container.appendChild(btn);
             });
