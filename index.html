@@ -1344,17 +1344,35 @@
                 const dev = availableVideoDevices.find(d => d.deviceId === selectedValue);
                 cameraLabel = dev ? (dev.label || 'dispositivo seleccionado') : 'dispositivo seleccionado';
             } else {
-                // Auto: en movil trasera (environment), en PC cualquier camara (sin facingMode estricto)
+                // Auto: en movil trasera (environment), en PC buscar la webcam real
                 const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
                     || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
                 if (isMobile) {
                     cameraConstraints = { facingMode: "environment" };
                     cameraLabel = 'trasera (movil)';
                 } else {
-                    // PC: sin facingMode para que el navegador elija la camara por defecto
-                    // (suele ser la webcam real, no la virtual)
-                    cameraConstraints = { facingMode: "user" };
-                    cameraLabel = 'frontal (PC)';
+                    // PC: buscar la primera camara REAL (no virtual) por deviceId
+                    // Esto evita que el navegador seleccione la Mirametrix Virtual Camera
+                    // u otras camaras virtuales que muestran pantalla negra
+                    const isVirtual = (label) => {
+                        if (!label) return false;
+                        const l = label.toLowerCase();
+                        return l.includes('virtual') || l.includes('mirametrix') || l.includes('obs ')
+                            || l.includes('manycam') || l.includes('snap') || l.includes('droidcam')
+                            || l.includes('ivcam') || l.includes('camo ');
+                    };
+                    const realCamera = availableVideoDevices.find(d => d.label && !isVirtual(d.label));
+                    if (realCamera) {
+                        cameraConstraints = { deviceId: { exact: realCamera.deviceId } };
+                        cameraLabel = realCamera.label;
+                        console.log(`PC: camara real seleccionada: ${realCamera.label}`);
+                        // Actualizar el dropdown para reflejar la seleccion
+                        if (select) select.value = realCamera.deviceId;
+                    } else {
+                        // Sin camaras reales identificadas: fallback a facingMode user
+                        cameraConstraints = { facingMode: "user" };
+                        cameraLabel = 'frontal (PC, sin identificacion)';
+                    }
                 }
             }
 
@@ -1440,19 +1458,36 @@
             }
         }
 
+        // ================= ANTIESPAM DE ESCANEO =================
+        // Evita que el mismo alumno sea escaneado dos veces seguidas en menos de 10s
+        // (la camara puede detectar el mismo QR varias veces por segundo)
+        let lastScannedId = null;
+        let lastScanTimestamp = 0;
+        const SCAN_COOLDOWN_MS = 10000; // 10 segundos
+
         function onScanSuccess(decodedText) {
             if (!isScanningActive) return;
-            // Normalizar: trim + quitar posibles espacios/retorno internos por si el lector los aniade
             const cleaned = String(decodedText || '').trim();
             console.log("QR decodificado:", JSON.stringify(cleaned), "longitud:", cleaned.length);
 
             const student = allStudents.find(s => s.id === cleaned);
             if (student) {
+                // ANTIESPAM: si es el mismo alumno y han pasado menos de 10s, ignorar
+                const now = Date.now();
+                if (lastScannedId === student.id && (now - lastScanTimestamp) < SCAN_COOLDOWN_MS) {
+                    const remaining = Math.ceil((SCAN_COOLDOWN_MS - (now - lastScanTimestamp)) / 1000);
+                    console.log(`Mismo alumno escaneado hace ${Math.round((now - lastScanTimestamp)/1000)}s. Ignorando (quedan ${remaining}s)`);
+                    return; // No procesar, seguir escaneando
+                }
+                // Registrar escaneo
+                lastScannedId = student.id;
+                lastScanTimestamp = now;
+                console.log(`Alumno escaneado: ${student.name} a las ${new Date(now).toLocaleTimeString()}`);
+
                 stopScannerVisually();
                 triggerActionView(student);
                 navigator.vibrate && navigator.vibrate(200);
             } else {
-                // Log de diagnostico: mostrar IDs disponibles para comparar
                 console.log("ID no encontrado. IDs disponibles (primeros 3):",
                     allStudents.slice(0, 3).map(s => ({ id: s.id, len: s.id.length })));
                 isScanningActive = false;
