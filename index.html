@@ -54,26 +54,31 @@
     <meta name="twitter:title" content="Pisaporte V2 - Control de Servicios">
     <meta name="twitter:image" content="icons/icon-512x512.png">
 
-    <!-- Tailwind CSS via CDN (silenciar warning de produccion)
-         El CDN de Tailwind muestra un warning recomendando PostCSS/CLI para produccion.
-         Como esta app es una PWA estatica sin build, silenciamos ese warning especifico. -->
+    <!-- Tailwind CSS via CDN (silenciar warnings de consola)
+         Esta app es una PWA estatica sin build, asi que silenciamos los warnings
+         no criticos de Tailwind CDN y Firebase enableIndexedDbPersistence para
+         mantener la consola limpia. La funcionalidad no se ve afectada. -->
     <script>
         // Guardar referencia al console.warn original
         const _originalWarn = console.warn.bind(console);
+        // Lista de mensajes de warning a silenciar (substrings)
+        const _silenceWarnings = [
+            'cdn.tailwindcss.com should not be used in production',
+            'enableIndexedDbPersistence() will be deprecated',
+            'Firestore (11.6.1): enableIndexedDbPersistence() will be deprecated'
+        ];
         console.warn = function(...args) {
-            // Filtrar el warning especifico de Tailwind CDN
-            if (args.length > 0 && typeof args[0] === 'string' &&
-                args[0].includes('cdn.tailwindcss.com should not be used in production')) {
-                return; // silenciar
+            if (args.length > 0 && typeof args[0] === 'string') {
+                for (const sw of _silenceWarnings) {
+                    if (args[0].includes(sw)) return; // silenciar
+                }
             }
             _originalWarn(...args);
         };
+        // Restaurar tras 3 segundos (suficiente para los warnings de carga inicial)
+        setTimeout(() => { console.warn = _originalWarn; }, 3000);
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        // Restaurar console.warn original tras cargar Tailwind
-        console.warn = _originalWarn;
-    </script>
     
     <!-- Font Awesome para Iconos -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -699,7 +704,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc, enableIndexedDbPersistence, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ================= CONFIGURACIÓN FIREBASE =================
         const userFirebaseConfig = {
@@ -716,21 +721,7 @@
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
-        // Inicializar Firestore con cache local persistente (IndexedDB)
-        // Usamos initializeFirestore + persistentLocalCache en lugar de getFirestore + enableIndexedDbPersistence
-        // (que esta deprecated segun el warning de Firebase 11.x)
-        let db;
-        try {
-            db = initializeFirestore(app, {
-                cache: persistentLocalCache({
-                    tabManager: persistentMultipleTabManager()
-                })
-            });
-        } catch (e) {
-            // Fallback: si la cache persistente falla (ej. modo incognito), inicializar sin cache
-            console.warn("No se pudo inicializar cache persistente, usando Firestore sin cache:", e.message);
-            db = getFirestore(app);
-        }
+        const db = getFirestore(app);
 
         // ================= APP ID - NO CAMBIAR =================
         // El appId determina la ruta de Firestore: artifacts/{appId}/public/data/pisaporte_*
@@ -787,9 +778,28 @@
             if (overlay) overlay.style.display = 'none';
         };
 
-        // NOTA: La persistencia offline de Firestore ya se configura en initializeFirestore
-        // arriba (persistentLocalCache). No hace falta llamar a enableIndexedDbPersistence
-        // (que ademas esta deprecated en Firebase 11.x).
+        // Habilitar persistencia offline de Firestore (IndexedDB)
+        // NOTA: enableIndexedDbPersistence muestra un warning en consola de que sera deprecated
+        // en el futuro, pero sigue funcionando correctamente en Firebase 11.x.
+        // La alternativa (initializeFirestore + persistentLocalCache) rompe cuando el navegador
+        // ya tiene una base de datos IndexedDB creada con la configuracion antigua, por eso
+        // mantenemos esta forma que es mas compatible.
+        try {
+            enableIndexedDbPersistence(db).catch((err) => {
+                if (err.code === 'failed-precondition') {
+                    // Multiple tabs open, persistence can only be enabled in one tab at a time
+                    console.warn("Persistencia offline no disponible: hay multiples pestañas abiertas.");
+                } else if (err.code === 'unimplemented') {
+                    // Browser doesn't support persistence
+                    console.warn("Persistencia offline no soportada por este navegador.");
+                } else {
+                    console.warn("No se pudo habilitar persistencia offline de Firestore:", err.code, err.message);
+                }
+                window.__firebaseDebug.lastErrors.push({ type: 'persistence', code: err.code, message: err.message, ts: Date.now() });
+            });
+        } catch (e) {
+            console.warn("enableIndexedDbPersistence no disponible:", e);
+        }
 
         // Forzar persistencia LOCAL de Auth (sobrevive al cierre del navegador)
         // Esto es CRITICO para que la sesion anónima sea la misma entre recargas
