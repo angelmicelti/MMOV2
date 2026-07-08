@@ -1,9 +1,0 @@
-qr-scanner-app/
-├── index.html
-├── styles.css
-├── app.js
-├── firebase-config.js
-├── manifest.json
-├── sw.js
-├── icon-192.png   (debes añadirlo tú, 192x192 px)
-└── icon-512.png   (debes añadirlo tú, 512x512 px)
