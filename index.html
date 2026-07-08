@@ -438,7 +438,7 @@
                                     <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">2</span>
                                     Unidades
                                 </label>
-                                <div class="flex gap-1">
+                                <div id="report-units-actions" class="flex gap-1">
                                     <button type="button" onclick="selectAllUnits(true)" class="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-semibold hover:bg-blue-100">Todas</button>
                                     <button type="button" onclick="selectAllUnits(false)" class="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-semibold hover:bg-gray-200">Ninguna</button>
                                 </div>
@@ -836,15 +836,24 @@
 
         initAuth();
 
+        // Backoff exponencial para reintentos de auth (Bug #7.2)
+        let _authRetryDelay = 2000;
+        const _AUTH_MAX_RETRY_DELAY = 30000;
+
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 currentUser = user;
                 window.__firebaseDebug.authUid = user.uid;
                 console.log("Auth OK. UID anonimo:", user.uid, "(compartido entre navegadores que usen el mismo projectId)");
+                // Resetear backoff al tener exito
+                _authRetryDelay = 2000;
                 setupRealtimeListeners();
             } else {
-                console.warn("Auth: usuario no logueado. Reintentando signInAnonymously en 2s...");
-                setTimeout(initAuth, 2000);
+                // Backoff exponencial: 2s, 4s, 8s, 16s, 30s, 30s, ... (max 30s)
+                console.warn(`Auth: usuario no logueado. Reintentando signInAnonymously en ${_authRetryDelay/1000}s...`);
+                const delay = _authRetryDelay;
+                _authRetryDelay = Math.min(_authRetryDelay * 2, _AUTH_MAX_RETRY_DELAY);
+                setTimeout(initAuth, delay);
             }
         });
 
@@ -858,8 +867,18 @@
             }
         }, 5000);
 
+        // Flag para evitar listeners duplicados si onAuthStateChanged se dispara varias veces
+        // (token refresh, recuperacion de red, etc.)
+        let _listenersInitialized = false;
+
         function setupRealtimeListeners() {
             if (!currentUser) return;
+            // Evitar duplicar listeners: si ya estan configurados, no hacer nada
+            if (_listenersInitialized) {
+                console.log("Listeners ya configurados, evitando duplicados");
+                return;
+            }
+            _listenersInitialized = true;
 
             console.log("Configurando listeners Firestore. appId:", activeAppId);
             console.log("Ruta base: artifacts/" + activeAppId + "/public/data/pisaporte_*");
@@ -1080,6 +1099,7 @@
             const passwordConfirm = document.getElementById('setup-password-confirm').value.trim();
 
             if (!name || !username || !password || !passwordConfirm) return showToast("Rellena todos los campos");
+            if (password.length < 6) return showToast("La contraseña debe tener al menos 6 caracteres");
             if (password !== passwordConfirm) return showToast("Las contraseñas no coinciden");
             if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) return showToast("El nombre de usuario ya está en uso");
 
@@ -1108,6 +1128,7 @@
             const confirmPwd = document.getElementById('reg-password-confirm').value.trim();
 
             if (!name || !username || !password || !confirmPwd) return showToast("Rellena todos los campos");
+            if (password.length < 6) return showToast("La contraseña debe tener al menos 6 caracteres");
             if (password !== confirmPwd) return showToast("Las contraseñas no coinciden");
             if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) return showToast("El usuario ya existe. Elige otro.");
 
@@ -1132,17 +1153,27 @@
             const username = document.getElementById('login-username').value.trim();
             const password = document.getElementById('login-password').value.trim();
 
-            const foundUser = allUsers.find(u => u.username === username && u.password === password);
-            
+            // Validacion de campos vacios (Bug #9.4)
+            if (!username || !password) {
+                return showToast("Rellena usuario y contraseña.");
+            }
+
+            // Login case-insensitive en username (consistente con el registro, Bug #A)
+            const foundUser = allUsers.find(u =>
+                u.username.toLowerCase() === username.toLowerCase() &&
+                u.password === password
+            );
+
             if (foundUser) {
                 currentAppUser = foundUser;
-                document.getElementById('login-password').value = ''; // limpiar
-                
+                document.getElementById('login-username').value = ''; // limpiar (Bug #C)
+                document.getElementById('login-password').value = '';
+
                 // Configurar Interfaz
                 document.getElementById('current-user-name').textContent = foundUser.name.split(' ')[0];
                 document.getElementById('main-header').style.display = 'flex';
                 document.getElementById('main-nav').style.display = 'flex';
-                
+
                 showToast(`¡Bienvenido/a, ${foundUser.name}!`);
                 applyPermissions();
                 window.switchTab('scanner');
@@ -1152,7 +1183,29 @@
         };
 
         window.logout = () => {
+            // Resetear estado de sesion
             currentAppUser = null;
+            currentScannedStudent = null;
+            window.currentFilteredLogs = [];
+            // Resetear antiespam de escaneo
+            lastScannedId = null;
+            lastScanTimestamp = 0;
+            // Resetear botonera de unidades (volver a "todas")
+            _selectedUnits = new Set();
+            _allUnitsSelected = true;
+            // Resetear pestana activa del informe
+            currentReportTab = 'students';
+            // Limpiar campos de login para que no queden visibles para el siguiente usuario
+            const lu = document.getElementById('login-username');
+            const lp = document.getElementById('login-password');
+            if (lu) lu.value = '';
+            if (lp) lp.value = '';
+            // Cerrar todos los modales abiertos
+            ['user-modal', 'student-modal', 'qr-preview-modal', 'confirm-modal', 'fb-debug-panel'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            // Detener camara y volver a pantalla de login
             stopScannerVisually();
             showLoginScreen();
         };
@@ -1325,6 +1378,7 @@
             let tutorGroup = document.getElementById('modal-user-group').value.trim();
 
             if (!name || !username || !password || !confirmPwd) return showToast("Faltan datos por rellenar");
+            if (password.length < 6) return showToast("La contraseña debe tener al menos 6 caracteres");
             if (password !== confirmPwd) return showToast("Las contraseñas no coinciden");
             if (role === 'tutor' && !tutorGroup) return showToast("Indica el grupo del tutor");
 
@@ -1463,6 +1517,14 @@
         };
 
         function initScanner() {
+            // Verificar que la libreria html5-qrcode se haya cargado (Bug #H)
+            if (typeof Html5Qrcode === 'undefined') {
+                console.error("Html5Qrcode no esta definido. La libreria no se cargo.");
+                showToast("Error: libreria de escáner no cargada. Recarga la página.");
+                const restartBtn = document.getElementById('restart-scanner-btn');
+                if (restartBtn) restartBtn.classList.remove('hidden');
+                return;
+            }
             html5QrcodeScanner = new Html5Qrcode("reader");
             // Rellenar el selector de camaras en cuanto el scanner esta listo
             populateCameraSelector().catch(() => {});
@@ -1482,146 +1544,142 @@
                 return;
             }
             _startScannerInFlight = true;
-            document.getElementById('restart-scanner-btn').classList.add('hidden');
-
-            // Verificar soporte
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                _startScannerInFlight = false;
-                document.getElementById('restart-scanner-btn').classList.remove('hidden');
-                showToast("Este navegador no soporta acceso a la camara.");
-                return;
-            }
-
-            // Refrescar el selector de camaras por si han cambiado
-            try { await populateCameraSelector(); } catch(e) {}
-
-            // Configuracion simple similar a la version original que funcionaba
-            const qrboxFn = (viewfinderWidth, viewfinderHeight) => {
-                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-                const size = Math.max(200, Math.floor(minEdge * 0.7));
-                return { width: size, height: size };
-            };
-
-            const config = {
-                fps: 10,
-                qrbox: qrboxFn,
-                aspectRatio: 1.0,
-                disableFlip: false
-            };
-
-            // Determinar constraints segun seleccion del usuario
-            const select = document.getElementById('camera-select');
-            const selectedValue = select ? select.value : 'auto';
-
-            let cameraConstraints;
-            let cameraLabel = 'auto';
-
-            if (selectedValue && selectedValue !== 'auto') {
-                // Usuario eligio una camara concreta por deviceId
-                cameraConstraints = { deviceId: { exact: selectedValue } };
-                const dev = availableVideoDevices.find(d => d.deviceId === selectedValue);
-                cameraLabel = dev ? (dev.label || 'dispositivo seleccionado') : 'dispositivo seleccionado';
-            } else {
-                // Auto: en movil trasera (environment), en PC buscar la webcam real
-                const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
-                    || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
-                if (isMobile) {
-                    cameraConstraints = { facingMode: "environment" };
-                    cameraLabel = 'trasera (movil)';
-                } else {
-                    // PC: buscar la primera camara REAL (no virtual) por deviceId
-                    // Esto evita que el navegador seleccione la Mirametrix Virtual Camera
-                    // u otras camaras virtuales que muestran pantalla negra
-                    const isVirtual = (label) => {
-                        if (!label) return false;
-                        const l = label.toLowerCase();
-                        return l.includes('virtual') || l.includes('mirametrix') || l.includes('obs ')
-                            || l.includes('manycam') || l.includes('snap') || l.includes('droidcam')
-                            || l.includes('ivcam') || l.includes('camo ');
-                    };
-                    const realCamera = availableVideoDevices.find(d => d.label && !isVirtual(d.label));
-                    if (realCamera) {
-                        cameraConstraints = { deviceId: { exact: realCamera.deviceId } };
-                        cameraLabel = realCamera.label;
-                        console.log(`PC: camara real seleccionada: ${realCamera.label}`);
-                        // Actualizar el dropdown para reflejar la seleccion
-                        if (select) select.value = realCamera.deviceId;
-                    } else {
-                        // Sin camaras reales identificadas: fallback a facingMode user
-                        cameraConstraints = { facingMode: "user" };
-                        cameraLabel = 'frontal (PC, sin identificacion)';
-                    }
-                }
-            }
-
-            // IMPORTANTE: No llamar a stop() previamente si isScanningActive es false.
-            // Eso es lo que rompia el scanner en la version anterior (bucle infinito).
-            // Solo detener si realmente esta activo.
-            const doStart = () => {
-                return html5QrcodeScanner.start(cameraConstraints, config, onScanSuccess, onScanFailure);
-            };
-
-            console.log(`Iniciando camara: ${cameraLabel}`);
-
+            // try/finally garantiza que _startScannerInFlight se resetee incluso si
+            // alguna linea lanza una excepcion no capturada (Bug #5.1)
             try {
-                // Si el scanner ya esta activo, detenerlo primero (caso: cambio de camara)
-                if (html5QrcodeScanner.isScanning === true) {
-                    try {
-                        await html5QrcodeScanner.stop();
-                    } catch (e) {
-                        console.log("stop() previo (ignorado):", e.message || e);
-                    }
+                document.getElementById('restart-scanner-btn').classList.add('hidden');
+
+                // Verificar soporte
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    document.getElementById('restart-scanner-btn').classList.remove('hidden');
+                    showToast("Este navegador no soporta acceso a la camara.");
+                    return;
                 }
 
-                await doStart();
-                isScanningActive = true;
-                _startScannerInFlight = false;
-                console.log(`Camara iniciada OK: ${cameraLabel}`);
+                // Refrescar el selector de camaras por si han cambiado
+                try { await populateCameraSelector(); } catch(e) {}
 
-                // Mostrar nombre de la camara activa
-                const activeCamEl = document.getElementById('active-camera-name');
-                if (activeCamEl) {
-                    activeCamEl.textContent = `Camara activa: ${cameraLabel}`;
-                }
-            } catch (err) {
-                _startScannerInFlight = false;
-                console.error(`Error al iniciar camara ${cameraLabel}:`, err.name, err.message);
+                // Configuracion simple similar a la version original que funcionaba
+                const qrboxFn = (viewfinderWidth, viewfinderHeight) => {
+                    const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                    const size = Math.max(200, Math.floor(minEdge * 0.7));
+                    return { width: size, height: size };
+                };
 
-                // Si la camara seleccionada fallo, probar con la otra (solo en auto)
-                if (selectedValue === 'auto' || !selectedValue) {
-                    const fallbackConstraints = (cameraConstraints.facingMode === "environment")
-                        ? { facingMode: "user" }
-                        : { facingMode: "environment" };
-                    console.log("Fallback: probando camara alternativa");
-                    try {
-                        if (html5QrcodeScanner.isScanning === true) {
-                            try { await html5QrcodeScanner.stop(); } catch(e) {}
+                const config = {
+                    fps: 10,
+                    qrbox: qrboxFn,
+                    aspectRatio: 1.0,
+                    disableFlip: false
+                };
+
+                // Determinar constraints segun seleccion del usuario
+                const select = document.getElementById('camera-select');
+                const selectedValue = select ? select.value : 'auto';
+
+                let cameraConstraints;
+                let cameraLabel = 'auto';
+
+                if (selectedValue && selectedValue !== 'auto') {
+                    // Usuario eligio una camara concreta por deviceId
+                    cameraConstraints = { deviceId: { exact: selectedValue } };
+                    const dev = availableVideoDevices.find(d => d.deviceId === selectedValue);
+                    cameraLabel = dev ? (dev.label || 'dispositivo seleccionado') : 'dispositivo seleccionado';
+                } else {
+                    // Auto: en movil trasera (environment), en PC buscar la webcam real
+                    const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
+                        || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
+                    if (isMobile) {
+                        cameraConstraints = { facingMode: "environment" };
+                        cameraLabel = 'trasera (movil)';
+                    } else {
+                        // PC: buscar la primera camara REAL (no virtual) por deviceId
+                        const isVirtual = (label) => {
+                            if (!label) return false;
+                            const l = label.toLowerCase();
+                            return l.includes('virtual') || l.includes('mirametrix') || l.includes('obs ')
+                                || l.includes('manycam') || l.includes('snap') || l.includes('droidcam')
+                                || l.includes('ivcam') || l.includes('camo ');
+                        };
+                        const realCamera = availableVideoDevices.find(d => d.label && !isVirtual(d.label));
+                        if (realCamera) {
+                            cameraConstraints = { deviceId: { exact: realCamera.deviceId } };
+                            cameraLabel = realCamera.label;
+                            console.log(`PC: camara real seleccionada: ${realCamera.label}`);
+                            if (select) select.value = realCamera.deviceId;
+                        } else {
+                            cameraConstraints = { facingMode: "user" };
+                            cameraLabel = 'frontal (PC, sin identificacion)';
                         }
-                        await html5QrcodeScanner.start(fallbackConstraints, config, onScanSuccess, onScanFailure);
-                        isScanningActive = true;
-                        console.log("Camara alternativa iniciada OK");
-                        const activeCamEl = document.getElementById('active-camera-name');
-                        if (activeCamEl) activeCamEl.textContent = `Camara activa: alternativa`;
-                        return;
-                    } catch (err2) {
-                        console.error("Fallback tambien fallo:", err2.name, err2.message);
                     }
                 }
 
-                document.getElementById('restart-scanner-btn').classList.remove('hidden');
-                let msg = "No se pudo acceder a la camara.";
-                if (err) {
-                    if (err.name === 'NotAllowedError') {
-                        msg = "Permiso de camara denegado. Activa el permiso en el navegador.";
-                    } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
-                        msg = "No se encontro ninguna camara compatible.";
-                    } else if (err.name === 'NotReadableError') {
-                        msg = "La camara esta siendo usada por otra aplicacion. Cierrala e intenta de nuevo.";
-                    } else if (err.message) {
-                        msg = "Error de camara: " + err.message;
+                const doStart = () => {
+                    return html5QrcodeScanner.start(cameraConstraints, config, onScanSuccess, onScanFailure);
+                };
+
+                console.log(`Iniciando camara: ${cameraLabel}`);
+
+                try {
+                    // Si el scanner ya esta activo, detenerlo primero (caso: cambio de camara)
+                    if (html5QrcodeScanner.isScanning === true) {
+                        try {
+                            await html5QrcodeScanner.stop();
+                        } catch (e) {
+                            console.log("stop() previo (ignorado):", e.message || e);
+                        }
                     }
+
+                    await doStart();
+                    isScanningActive = true;
+                    console.log(`Camara iniciada OK: ${cameraLabel}`);
+
+                    const activeCamEl = document.getElementById('active-camera-name');
+                    if (activeCamEl) {
+                        activeCamEl.textContent = `Camara activa: ${cameraLabel}`;
+                    }
+                } catch (err) {
+                    console.error(`Error al iniciar camara ${cameraLabel}:`, err.name, err.message);
+
+                    // Si la camara seleccionada fallo, probar con la otra (solo en auto)
+                    if (selectedValue === 'auto' || !selectedValue) {
+                        const fallbackConstraints = (cameraConstraints.facingMode === "environment")
+                            ? { facingMode: "user" }
+                            : { facingMode: "environment" };
+                        console.log("Fallback: probando camara alternativa");
+                        try {
+                            if (html5QrcodeScanner.isScanning === true) {
+                                try { await html5QrcodeScanner.stop(); } catch(e) {}
+                            }
+                            await html5QrcodeScanner.start(fallbackConstraints, config, onScanSuccess, onScanFailure);
+                            isScanningActive = true;
+                            console.log("Camara alternativa iniciada OK");
+                            const activeCamEl = document.getElementById('active-camera-name');
+                            if (activeCamEl) activeCamEl.textContent = `Camara activa: alternativa`;
+                            return;
+                        } catch (err2) {
+                            console.error("Fallback tambien fallo:", err2.name, err2.message);
+                        }
+                    }
+
+                    document.getElementById('restart-scanner-btn').classList.remove('hidden');
+                    let msg = "No se pudo acceder a la camara.";
+                    if (err) {
+                        if (err.name === 'NotAllowedError') {
+                            msg = "Permiso de camara denegado. Activa el permiso en el navegador.";
+                        } else if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+                            msg = "No se encontro ninguna camara compatible.";
+                        } else if (err.name === 'NotReadableError') {
+                            msg = "La camara esta siendo usada por otra aplicacion. Cierrala e intenta de nuevo.";
+                        } else if (err.message) {
+                            msg = "Error de camara: " + err.message;
+                        }
+                    }
+                    showToast(msg);
                 }
-                showToast(msg);
+            } finally {
+                // Garantizar que el flag se resetee en todos los paths (Bug #5.1)
+                _startScannerInFlight = false;
             }
         };
 
@@ -1854,11 +1912,15 @@
             const reportSelect = document.getElementById('report-group');
 
             if (currentAppUser.role === 'tutor') {
-                const tg = currentAppUser.tutorGroup;
+                // Fallback a '(sin grupo)' si tutorGroup falta (datos legacy)
+                const tg = currentAppUser.tutorGroup || '(sin grupo)';
                 filterSelect.innerHTML = `<option value="${tg}">${tg}</option>`;
                 reportSelect.innerHTML = `<option value="${tg}">${tg}</option>`;
-                updateStudentSelector(tg);
+                // Si tutorGroup era '(sin grupo)', no filtrar alumnos (no habra coincidencias)
+                updateStudentSelector(tg === '(sin grupo)' ? 'ALL' : tg);
                 updateUserSelector();
+                renderUnitsButtons();
+                updateStudentSelectorForSelectedUnits();
                 return;
             }
 
@@ -1874,7 +1936,8 @@
             if ([...filterSelect.options].some(o => o.value === currentFilter)) filterSelect.value = currentFilter;
             if ([...reportSelect.options].some(o => o.value === currentReport)) reportSelect.value = currentReport;
 
-            // Rellenar selector de alumnos del informe
+            // Rellenar selector de alumnos del informe (Bug #1.2: solo llamar a updateStudentSelectorForSelectedUnits,
+            // no a updateStudentSelector, que ya esta obsoleto en la pestana Alumnado)
             updateStudentSelector(reportSelect.value);
             // Rellenar selector de usuarios del informe
             updateUserSelector();
@@ -1975,8 +2038,14 @@
             sel.innerHTML = html;
             // Restaurar seleccion previa si sigue siendo valida
             if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
-            // Limpiar buscador
-            if (searchInput) searchInput.value = '';
+            // Preservar el texto del buscador para re-aplicar el filtro (Bug #1.3)
+            const prevSearch = searchInput ? searchInput.value : '';
+            if (searchInput) {
+                searchInput.value = prevSearch;
+                if (prevSearch) {
+                    filterUserSelect();
+                }
+            }
         }
         window.updateUserSelector = updateUserSelector;
 
@@ -2023,9 +2092,12 @@
         // Rellena la botonera de unidades con los grupos disponibles
         function renderUnitsButtons() {
             const container = document.getElementById('report-units-buttons');
+            const actionsContainer = document.getElementById('report-units-actions');
             if (!container) return;
             if (currentAppUser?.role === 'tutor') {
                 // Tutores: solo ven su grupo, no pueden elegir otros
+                // Ocultar botones Todas/Ninguna
+                if (actionsContainer) actionsContainer.classList.add('hidden');
                 const tg = currentAppUser.tutorGroup || '(sin grupo)';
                 container.innerHTML = `<span class="text-xs text-gray-500 italic">Tu grupo: ${tg}</span>`;
                 _selectedUnits = new Set([tg]);
@@ -2034,9 +2106,13 @@
             }
             const groups = [...new Set(allStudents.map(s => s.course))].sort();
             if (groups.length === 0) {
+                // Sin grupos: ocultar acciones y mostrar mensaje
+                if (actionsContainer) actionsContainer.classList.add('hidden');
                 container.innerHTML = '<span class="text-xs text-gray-400 italic">No hay unidades disponibles</span>';
                 return;
             }
+            // Mostrar acciones Todas/Ninguna (por si estaban ocultas)
+            if (actionsContainer) actionsContainer.classList.remove('hidden');
             container.innerHTML = '';
             groups.forEach(g => {
                 const btn = document.createElement('button');
@@ -2133,6 +2209,8 @@
             const searchInput = document.getElementById('report-student-search');
             if (!sel) return;
             const currentVal = sel.value;
+            // Preservar el texto del buscador para re-aplicar el filtro despues
+            const prevSearch = searchInput ? searchInput.value : '';
 
             const units = getSelectedUnitsForFilter();
             let students = allStudents;
@@ -2166,8 +2244,14 @@
             } else {
                 sel.value = 'ALL';
             }
-            // Limpiar buscador
-            if (searchInput) searchInput.value = '';
+            // Re-aplicar el filtro del buscador si habia texto (Bug #1.3: no limpiar el buscador)
+            if (searchInput) {
+                searchInput.value = prevSearch;
+                if (prevSearch) {
+                    // Re-filtrar las opciones del select segun el texto preservado
+                    filterStudentSelect();
+                }
+            }
         }
         window.updateStudentSelectorForSelectedUnits = updateStudentSelectorForSelectedUnits;
 
@@ -2481,12 +2565,26 @@
                 // Doble verificacion: esperar un frame mas para que el layout se asiente
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
-                        window.print();
-                        setTimeout(() => {
+                        // Usar afterprint para limpiar el area cuando el dialogo de impresion se cierra
+                        // (mas fiable que setTimeout 1s en navegadores donde print() no bloquea)
+                        const cleanupAfterPrint = () => {
                             document.title = originalTitle;
-                            // Limpiar el area de impresion para liberar memoria
                             printArea.innerHTML = '';
-                        }, 1000);
+                            window.removeEventListener('afterprint', cleanupAfterPrint);
+                        };
+                        window.addEventListener('afterprint', cleanupAfterPrint);
+                        // Fallback por si afterprint no dispara (algunos navegadores moviles)
+                        setTimeout(() => {
+                            if (printArea.innerHTML !== '') {
+                                cleanupAfterPrint();
+                            }
+                        }, 5000);
+                        try {
+                            window.print();
+                        } catch (e) {
+                            console.error('window.print() fallo:', e);
+                            cleanupAfterPrint();
+                        }
                     });
                 });
             }).catch(e => {
@@ -2886,7 +2984,25 @@
 
             const originalTitle = document.title;
             document.title = `Informe_PisaporteV2_${formatGroupNameForFile(groupFilter)}_${timeFilterText.replace(/\s+/g, '')}`;
-            setTimeout(() => { window.print(); setTimeout(() => { document.title = originalTitle; printArea.innerHTML = ''; }, 1000); }, 500);
+            // Usar afterprint para limpiar el area cuando el dialogo de impresion se cierra
+            const cleanupReportAfterPrint = () => {
+                document.title = originalTitle;
+                printArea.innerHTML = '';
+                window.removeEventListener('afterprint', cleanupReportAfterPrint);
+            };
+            window.addEventListener('afterprint', cleanupReportAfterPrint);
+            // Fallback por si afterprint no dispara
+            setTimeout(() => {
+                if (printArea.innerHTML !== '') cleanupReportAfterPrint();
+            }, 6000);
+            setTimeout(() => {
+                try {
+                    window.print();
+                } catch (e) {
+                    console.error('window.print() fallo:', e);
+                    cleanupReportAfterPrint();
+                }
+            }, 500);
         };
 
         // ================= UTILIDADES =================
@@ -3042,11 +3158,18 @@
             return slots;
         }
 
+        // Variable para cancelar timeouts anteriores de showToast (Bug #E)
+        let _toastTimeoutId = null;
         function showToast(msg) {
             const toast = document.getElementById('toast');
             document.getElementById('toast-msg').textContent = msg;
             toast.style.opacity = '1';
-            setTimeout(() => { toast.style.opacity = '0'; }, 5000);
+            // Cancelar timeout anterior si existe, para que el toast dure 5s desde el ULTIMO showToast
+            if (_toastTimeoutId) clearTimeout(_toastTimeoutId);
+            _toastTimeoutId = setTimeout(() => {
+                toast.style.opacity = '0';
+                _toastTimeoutId = null;
+            }, 5000);
         }
 
         // ================= PANEL DE DIAGNOSTICO FIREBASE =================
