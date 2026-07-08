@@ -1500,7 +1500,24 @@
                     margin: 0;
                     padding: 0;
                 }
-                /* Contenedor pagina: flex column para centrar verticalmente */
+                /* OVERRIDE del CSS global: #print-area tiene position:absolute;top:0
+                   que ancla el contenido arriba e impide el centrado vertical.
+                   Lo cambiamos a position:static + flex column con justify-content:center
+                   y altura fija en mm (100vh no es fiable en impresion). */
+                #print-area {
+                    position: static !important;
+                    top: auto !important;
+                    left: auto !important;
+                    width: 100% !important;
+                    display: flex !important;
+                    flex-direction: column;
+                    justify-content: center;
+                    /* A4 = 297mm alto. Con margen 8mm arriba + 8mm abajo = 281mm utiles.
+                       Usamos min-height (no height) para que crezca si hay >8 tarjetas. */
+                    min-height: 281mm;
+                    background: white;
+                }
+                /* Contenedor de tarjetas: centra horizontalmente y distribuye filas */
                 .qr-print-page {
                     display: flex;
                     flex-wrap: wrap;
@@ -1509,7 +1526,6 @@
                     align-items: stretch;
                     align-content: center;
                     justify-content: center;
-                    min-height: calc(100vh - 16mm);
                 }
                 .qr-card {
                     width: 85.6mm;
