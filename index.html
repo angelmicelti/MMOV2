@@ -460,6 +460,17 @@
         </div>
     </div>
 
+    <!-- Modal Vista Previa QR (para probar escaneo desde la pantalla) -->
+    <div id="qr-preview-modal" class="fixed inset-0 bg-black bg-opacity-70 z-50 items-center justify-center" style="display: none;">
+        <div class="bg-white rounded-xl p-6 max-w-xs w-full mx-4 shadow-xl text-center">
+            <h3 id="qr-preview-title" class="text-lg font-bold text-gray-800 mb-1">Alumno</h3>
+            <p class="text-xs text-gray-500 mb-4">Muestra este QR a la camara o escanealo desde otro dispositivo</p>
+            <div id="qr-preview-container" class="inline-block bg-white p-4 border border-gray-200 rounded-lg" style="line-height: 0;"></div>
+            <p class="text-[10px] text-gray-400 mt-3 break-all" id="qr-preview-id-hint"></p>
+            <button onclick="closeQRPreview()" class="mt-4 w-full bg-gray-800 hover:bg-gray-900 text-white py-2 rounded-lg text-sm font-medium transition-colors">Cerrar</button>
+        </div>
+    </div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -961,12 +972,36 @@
         window.startScanner = () => {
             if (!html5QrcodeScanner) return;
             document.getElementById('restart-scanner-btn').classList.add('hidden');
-            const config = { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
-            
+
+            // qrbox adaptativo: 70% del min(ancho, alto) del video, con minimo 200x200
+            // Esto evita problemas en pantallas pequenas y mejora el encuadre
+            const qrboxFn = (viewfinderWidth, viewfinderHeight) => {
+                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                const size = Math.max(200, Math.floor(minEdge * 0.7));
+                return { width: size, height: size };
+            };
+
+            const config = {
+                fps: 15,
+                qrbox: qrboxFn,
+                aspectRatio: 1.333,
+                disableFlip: false,
+                experimentalFeatures: {
+                    useBarCodeDetectorIfSupported: true
+                },
+                videoConstraints: {
+                    facingMode: { ideal: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
             html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
                 .then(() => { isScanningActive = true; })
                 .catch(err => {
+                    console.error("Error al iniciar camara:", err);
                     document.getElementById('restart-scanner-btn').classList.remove('hidden');
+                    showToast("No se pudo acceder a la camara. Revisa permisos.");
                 });
         };
 
@@ -983,18 +1018,27 @@
 
         function onScanSuccess(decodedText) {
             if (!isScanningActive) return;
-            const student = allStudents.find(s => s.id === decodedText);
+            // Normalizar: trim + quitar posibles espacios/retorno internos por si el lector los aniade
+            const cleaned = String(decodedText || '').trim();
+            console.log("QR decodificado:", JSON.stringify(cleaned), "longitud:", cleaned.length);
+
+            const student = allStudents.find(s => s.id === cleaned);
             if (student) {
                 stopScannerVisually();
                 triggerActionView(student);
-                navigator.vibrate && navigator.vibrate(200); 
+                navigator.vibrate && navigator.vibrate(200);
             } else {
+                // Log de diagnostico: mostrar IDs disponibles para comparar
+                console.log("ID no encontrado. IDs disponibles (primeros 3):",
+                    allStudents.slice(0, 3).map(s => ({ id: s.id, len: s.id.length })));
                 isScanningActive = false;
-                showToast("Carnet no reconocido.");
+                showToast("Carnet no reconocido. ID: " + cleaned.substring(0, 8) + "...");
                 setTimeout(() => { isScanningActive = true; }, 2000);
             }
         }
-        function onScanFailure() {}
+        function onScanFailure(error) {
+            // Fallo normal mientras busca; no hacer nada para no spamear consola
+        }
 
         // ================= VISTA DE ACCIÓN =================
         function triggerActionView(student) {
@@ -1161,6 +1205,7 @@
             let html = '<ul class="divide-y divide-gray-100">';
             filtered.forEach(s => {
                 const safeName = s.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+                const safeId = s.id.replace(/'/g, "\\'");
                 html += `
                     <li class="py-2 flex justify-between items-center text-sm">
                         <div>
@@ -1168,7 +1213,9 @@
                             <span class="block text-xs text-gray-400">${s.course}</span>
                         </div>
                         <div class="flex items-center gap-2">
-                            <i class="fa-solid fa-qrcode text-gray-300"></i>
+                            <button onclick="showQRPreview('${safeId}', '${safeName}')" class="text-blue-500 hover:text-blue-700 transition-colors p-2" title="Ver QR en pantalla">
+                                <i class="fa-solid fa-qrcode"></i>
+                            </button>
                             <button onclick="confirmDeleteStudent('${s.id}', '${safeName}')" class="text-red-400 hover:text-red-600 transition-colors p-2"><i class="fa-solid fa-trash-can"></i></button>
                         </div>
                     </li>
@@ -1176,6 +1223,40 @@
             });
             html += '</ul>';
             listDiv.innerHTML = html;
+        };
+
+        // Vista previa de QR en pantalla (para pruebas de escaneo sin imprimir)
+        window.showQRPreview = (studentId, studentName) => {
+            const modal = document.getElementById('qr-preview-modal');
+            const title = document.getElementById('qr-preview-title');
+            const container = document.getElementById('qr-preview-container');
+            const hint = document.getElementById('qr-preview-id-hint');
+            title.textContent = studentName;
+            hint.textContent = `ID: ${studentId}`;
+            container.innerHTML = '';
+            // QR grande (300x300) con nivel H para que sea facilmente escaneable desde otra pantalla
+            new QRCode(container, {
+                text: studentId,
+                width: 300,
+                height: 300,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+            // Forzar fondo blanco y display block en el canvas/img generado
+            setTimeout(() => {
+                const imgs = container.querySelectorAll('img, canvas');
+                imgs.forEach(el => {
+                    el.style.display = 'block';
+                    el.style.background = '#ffffff';
+                });
+            }, 50);
+            modal.style.display = 'flex';
+        };
+        window.closeQRPreview = () => {
+            document.getElementById('qr-preview-modal').style.display = 'none';
+            // Limpiar para liberar memoria
+            document.getElementById('qr-preview-container').innerHTML = '';
         };
 
         window.printQRCards = () => {
@@ -1187,7 +1268,7 @@
             const printArea = document.getElementById('print-area');
             printArea.innerHTML = ''; 
             const style = document.createElement('style');
-            style.innerHTML = `@page { size: A4; margin: 1cm; } .qr-grid-wrapper { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; width: 100%; } .card { border: 2px dashed #ccc; padding: 20px; text-align: center; height: 250px; display: flex; flex-direction: column; justify-content: center; align-items: center; page-break-inside: avoid; } .card-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; } .card-course { font-size: 12px; color: #666; margin-bottom: 15px; } .qr-container { background: white; padding: 10px; border: 1px solid #eee; border-radius: 8px; }`;
+            style.innerHTML = `@page { size: A4; margin: 1cm; } .qr-grid-wrapper { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; width: 100%; } .card { border: 2px dashed #ccc; padding: 20px; text-align: center; height: 320px; display: flex; flex-direction: column; justify-content: center; align-items: center; page-break-inside: avoid; } .card-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; } .card-course { font-size: 13px; color: #666; margin-bottom: 15px; } .qr-container { background: white; padding: 16px; border: 1px solid #eee; border-radius: 8px; line-height: 0; } .qr-container img, .qr-container canvas { display: block !important; image-rendering: pixelated; image-rendering: crisp-edges; }`;
             printArea.appendChild(style);
             
             const gridWrapper = document.createElement('div');
@@ -1199,7 +1280,16 @@
                 const qrContainer = document.createElement('div'); qrContainer.className = 'qr-container';
                 card.appendChild(qrContainer);
                 gridWrapper.appendChild(card);
-                new QRCode(qrContainer, { text: s.id, width: 120, height: 120, colorDark : "#000000", colorLight : "#ffffff", correctLevel : QRCode.CorrectLevel.L });
+                // Nivel H = alta correccion de errores (30%), facilita lectura con arrugas/reflejos
+                // Tamano 200x200 con renderizado nitido via canvas
+                new QRCode(qrContainer, {
+                    text: s.id,
+                    width: 200,
+                    height: 200,
+                    colorDark: "#000000",
+                    colorLight: "#ffffff",
+                    correctLevel: QRCode.CorrectLevel.H
+                });
             });
             printArea.appendChild(gridWrapper);
 
