@@ -25,6 +25,9 @@
     <link rel="apple-touch-icon" href="icons/apple-touch-icon-180x180.png">
 
     <!-- Apple PWA metas -->
+    <!-- 'mobile-web-app-capable' es la etiqueta moderna (no deprecation warning).
+         'apple-mobile-web-app-capable' se mantiene por compatibilidad con iOS antiguos. -->
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pisaporte V2">
@@ -51,8 +54,26 @@
     <meta name="twitter:title" content="Pisaporte V2 - Control de Servicios">
     <meta name="twitter:image" content="icons/icon-512x512.png">
 
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS via CDN (silenciar warning de produccion)
+         El CDN de Tailwind muestra un warning recomendando PostCSS/CLI para produccion.
+         Como esta app es una PWA estatica sin build, silenciamos ese warning especifico. -->
+    <script>
+        // Guardar referencia al console.warn original
+        const _originalWarn = console.warn.bind(console);
+        console.warn = function(...args) {
+            // Filtrar el warning especifico de Tailwind CDN
+            if (args.length > 0 && typeof args[0] === 'string' &&
+                args[0].includes('cdn.tailwindcss.com should not be used in production')) {
+                return; // silenciar
+            }
+            _originalWarn(...args);
+        };
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Restaurar console.warn original tras cargar Tailwind
+        console.warn = _originalWarn;
+    </script>
     
     <!-- Font Awesome para Iconos -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -678,7 +699,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc, enableIndexedDbPersistence, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ================= CONFIGURACIÓN FIREBASE =================
         const userFirebaseConfig = {
@@ -695,7 +716,21 @@
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userFirebaseConfig;
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
-        const db = getFirestore(app);
+        // Inicializar Firestore con cache local persistente (IndexedDB)
+        // Usamos initializeFirestore + persistentLocalCache en lugar de getFirestore + enableIndexedDbPersistence
+        // (que esta deprecated segun el warning de Firebase 11.x)
+        let db;
+        try {
+            db = initializeFirestore(app, {
+                cache: persistentLocalCache({
+                    tabManager: persistentMultipleTabManager()
+                })
+            });
+        } catch (e) {
+            // Fallback: si la cache persistente falla (ej. modo incognito), inicializar sin cache
+            console.warn("No se pudo inicializar cache persistente, usando Firestore sin cache:", e.message);
+            db = getFirestore(app);
+        }
 
         // ================= APP ID - NO CAMBIAR =================
         // El appId determina la ruta de Firestore: artifacts/{appId}/public/data/pisaporte_*
@@ -752,16 +787,9 @@
             if (overlay) overlay.style.display = 'none';
         };
 
-        // Habilitar persistencia offline de Firestore (IndexedDB)
-        // Permite que los datos se guarden en el navegador y se sincronicen al recuperar conexion
-        try {
-            enableIndexedDbPersistence(db).catch((err) => {
-                console.warn("No se pudo habilitar persistencia offline de Firestore:", err.code, err.message);
-                window.__firebaseDebug.lastErrors.push({ type: 'persistence', code: err.code, message: err.message, ts: Date.now() });
-            });
-        } catch (e) {
-            console.warn("enableIndexedDbPersistence no disponible:", e);
-        }
+        // NOTA: La persistencia offline de Firestore ya se configura en initializeFirestore
+        // arriba (persistentLocalCache). No hace falta llamar a enableIndexedDbPersistence
+        // (que ademas esta deprecated en Firebase 11.x).
 
         // Forzar persistencia LOCAL de Auth (sobrevive al cierre del navegador)
         // Esto es CRITICO para que la sesion anónima sea la misma entre recargas
