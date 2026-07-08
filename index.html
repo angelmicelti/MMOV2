@@ -1195,9 +1195,22 @@
             }
         }
 
-        window.startScanner = () => {
+        window.startScanner = async () => {
             if (!html5QrcodeScanner) return;
             document.getElementById('restart-scanner-btn').classList.add('hidden');
+
+            // Verificar soporte de API de media devices
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                console.error("navigator.mediaDevices no soportado");
+                document.getElementById('restart-scanner-btn').classList.remove('hidden');
+                showToast("Este navegador no soporta acceso a la camara. Usa Chrome, Firefox o Safari recientes.");
+                return;
+            }
+
+            // Detectar si es movil (tacto + pantalla pequena) para elegir camara
+            const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
+                || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
+            console.log("Dispositivo detectado como:", isMobile ? "MOVIL" : "PC/DESKTOP");
 
             // qrbox adaptativo: 70% del min(ancho, alto) del video, con minimo 200x200
             const qrboxFn = (viewfinderWidth, viewfinderHeight) => {
@@ -1206,7 +1219,7 @@
                 return { width: size, height: size };
             };
 
-            const config = {
+            const baseConfig = {
                 fps: 15,
                 qrbox: qrboxFn,
                 aspectRatio: 1.333,
@@ -1220,69 +1233,98 @@
                 }
             };
 
-            // Estrategia de fallback para camara:
-            // 1. Probar camera trasera (environment) - ideal en movil
-            // 2. Si falla, probar cualquier camara (facingMode: 'user' o sin facingMode) - PC
-            // 3. Si falla, enumerar dispositivos y usar el primero que sea videoinput
-            const startWithEnvironment = () => {
-                const envConfig = { ...config, videoConstraints: { ...config.videoConstraints, facingMode: { ideal: "environment" } } };
-                return html5QrcodeScanner.start({ facingMode: { ideal: "environment" } }, envConfig, onScanSuccess, onScanFailure);
+            // Si el scanner ya estaba activo, detenerlo y limpiarlo antes de re-iniciar
+            // CRITICO: html5-qrcode no permite start() dos veces sin stop() entre medias
+            const safeStop = async () => {
+                try {
+                    if (html5QrcodeScanner && html5QrcodeScanner.isScanning) {
+                        await html5QrcodeScanner.stop();
+                    }
+                } catch (e) {
+                    // Ignorar errores de stop (scanner ya detenido, etc.)
+                    console.log("stop() previo (ignorado):", e.message || e);
+                }
+                try {
+                    if (html5QrcodeScanner) html5QrcodeScanner.clear();
+                } catch (e) {
+                    console.log("clear() previo (ignorado):", e.message || e);
+                }
             };
 
-            const startWithAnyCamera = () => {
-                console.log("Fallback: probando cualquier camara disponible (PC)");
-                return html5QrcodeScanner.start(
-                    { facingMode: { ideal: "user" } },
-                    config,
-                    onScanSuccess,
-                    onScanFailure
-                );
-            };
-
-            const startWithDeviceId = () => {
-                console.log("Fallback: enumerando dispositivos de video");
-                return navigator.mediaDevices.enumerateDevices()
-                    .then(devices => {
-                        const videoDevices = devices.filter(d => d.kind === 'videoinput');
-                        if (videoDevices.length === 0) {
-                            throw new Error("No se encontraron camaras conectadas");
-                        }
-                        console.log(`Camara encontrada: ${videoDevices[0].label || 'dispositivo ' + videoDevices[0].deviceId.substring(0, 8)}`);
-                        return html5QrcodeScanner.start(
-                            { deviceId: { exact: videoDevices[0].deviceId } },
-                            config,
-                            onScanSuccess,
-                            onScanFailure
-                        );
+            // Construir lista de camaras a probar en orden
+            const buildCameraCandidates = async () => {
+                const candidates = [];
+                if (isMobile) {
+                    // Movil: preferir trasera, luego frontal
+                    candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
+                    candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
+                } else {
+                    // PC: preferir frontal, luego cualquier camara disponible
+                    candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
+                    candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
+                }
+                // Ultimo recurso: enumerar dispositivos y usar el primero por deviceId
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    videoDevices.forEach((d, i) => {
+                        candidates.push({
+                            label: `dispositivo ${i + 1} (${d.label || d.deviceId.substring(0, 8)})`,
+                            constraints: { deviceId: { exact: d.deviceId } }
+                        });
                     });
+                } catch (e) {
+                    console.warn("No se pudo enumerar dispositivos:", e);
+                }
+                return candidates;
             };
 
-            startWithEnvironment()
-                .catch(err => {
-                    console.warn("Camara trasera no disponible:", err.code || err.name, err.message);
-                    return startWithAnyCamera();
-                })
-                .catch(err => {
-                    console.warn("Camara frontal no disponible:", err.code || err.name, err.message);
-                    return startWithDeviceId();
-                })
-                .then(() => {
+            try {
+                await safeStop();
+                const candidates = await buildCameraCandidates();
+                console.log(`Probar ${candidates.length} camaras en orden:`, candidates.map(c => c.label).join(', '));
+
+                let lastError = null;
+                let started = false;
+
+                for (const candidate of candidates) {
+                    try {
+                        console.log(`Intentando iniciar camara: ${candidate.label}`);
+                        const config = { ...baseConfig, videoConstraints: { ...baseConfig.videoConstraints, ...candidate.constraints } };
+                        await html5QrcodeScanner.start(candidate.constraints, config, onScanSuccess, onScanFailure);
+                        console.log(`Camara iniciada OK: ${candidate.label}`);
+                        started = true;
+                        break;
+                    } catch (err) {
+                        console.warn(`Fallo camara ${candidate.label}:`, err.name || err.code, err.message || '');
+                        lastError = err;
+                        // Limpiar el scanner antes del siguiente intento
+                        await safeStop();
+                    }
+                }
+
+                if (started) {
                     isScanningActive = true;
-                    console.log("Camara iniciada correctamente");
-                })
-                .catch(err => {
-                    console.error("Error al iniciar camara tras todos los intentos:", err);
-                    document.getElementById('restart-scanner-btn').classList.remove('hidden');
-                    let msg = "No se pudo acceder a la camara.";
-                    if (err && (err.name === 'NotAllowedError' || err.code === 'NotAllowedError')) {
-                        msg = "Permiso de camara denegado. Activa el permiso en el navegador.";
-                    } else if (err && (err.name === 'NotFoundError' || err.code === 'NotFoundError')) {
-                        msg = "No se encontro ninguna camara conectada.";
-                    } else if (err && err.message) {
+                } else {
+                    throw lastError || new Error("No se pudo iniciar ninguna camara");
+                }
+            } catch (err) {
+                console.error("Error al iniciar camara:", err);
+                document.getElementById('restart-scanner-btn').classList.remove('hidden');
+                let msg = "No se pudo acceder a la camara.";
+                if (err) {
+                    if (err.name === 'NotAllowedError' || err.code === 'NotAllowedError') {
+                        msg = "Permiso de camara denegado. Activa el permiso en el navegador (icono de camara en la barra de direcciones).";
+                    } else if (err.name === 'NotFoundError' || err.code === 'NotFoundError' || err.name === 'OverconstrainedError') {
+                        msg = "No se encontro ninguna camara compatible conectada.";
+                    } else if (err.name === 'NotReadableError') {
+                        msg = "La camara esta siendo usada por otra aplicacion. Cierrala e intenta de nuevo.";
+                    } else if (err.message) {
                         msg = "Error de camara: " + err.message;
                     }
-                    showToast(msg);
-                });
+                }
+                showToast(msg);
+            }
         };
 
         function stopScannerVisually() {
