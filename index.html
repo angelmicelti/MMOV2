@@ -358,7 +358,7 @@
         <!-- ================= VISTA: INFORMES ================= -->
         <section id="view-reports" class="view-section hidden">
             <div class="max-w-xl mx-auto mt-2 space-y-4">
-                <!-- Filtros comunes (periodo + grupo) -->
+                <!-- Filtros comunes (periodo + unidad) con flujo numerado -->
                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div class="flex justify-between items-center mb-3">
                         <h2 class="font-bold text-gray-700"><i class="fa-solid fa-chart-pie text-blue-500"></i> Filtros de Informe</h2>
@@ -367,16 +367,23 @@
                             <button id="btn-delete-logs" onclick="confirmDeleteLogs()" class="text-xs bg-red-50 text-red-600 px-3 py-1 rounded-md font-semibold hover:bg-red-100 transition-colors"><i class="fa-solid fa-trash-can"></i> Borrar</button>
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <select id="report-time" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
-                            <option value="today">Hoy</option>
-                            <option value="week">Esta semana</option>
-                            <option value="month">Este mes</option>
-                            <option value="all">Todo el curso</option>
-                        </select>
-                        <select id="report-group" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="onReportGroupChange()">
-                            <option value="ALL">Todos los grupos</option>
-                        </select>
+                    <!-- Paso 1: Periodo + Unidad -->
+                    <div class="space-y-2">
+                        <label class="block text-[10px] font-bold text-blue-600 uppercase">
+                            <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">1</span>
+                            Periodo y Unidad
+                        </label>
+                        <div class="grid grid-cols-2 gap-3">
+                            <select id="report-time" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
+                                <option value="today">Hoy</option>
+                                <option value="week">Esta semana</option>
+                                <option value="month">Este mes</option>
+                                <option value="all">Todo el curso</option>
+                            </select>
+                            <select id="report-group" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="onReportGroupChange()">
+                                <option value="ALL">Todas las unidades</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -393,9 +400,18 @@
 
                     <!-- Contenido pestaña Alumnado -->
                     <div id="report-tab-students" class="p-4 space-y-3">
-                        <!-- Selector de alumno concreto -->
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Alumno concreto</label>
+                        <!-- Paso 2: Buscar alumno concreto o seleccionar toda la unidad -->
+                        <div class="space-y-2">
+                            <label class="block text-[10px] font-bold text-blue-600 uppercase">
+                                <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">2</span>
+                                Alumno <span class="text-gray-400 font-normal normal-case">(opcional: deja vacío para toda la unidad)</span>
+                            </label>
+                            <!-- Buscador por nombre -->
+                            <div class="relative">
+                                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                                <input type="text" id="report-student-search" placeholder="Buscar alumno por nombre..." class="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" oninput="filterStudentSelect()">
+                            </div>
+                            <!-- Selector de alumno (filtrable por el buscador) -->
                             <select id="report-student" class="w-full border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
                                 <option value="ALL">Todos los alumnos</option>
                             </select>
@@ -438,9 +454,18 @@
 
                     <!-- Contenido pestaña Usuarios -->
                     <div id="report-tab-users" class="p-4 space-y-3 hidden">
-                        <!-- Selector de usuario concreto -->
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usuario concreto</label>
+                        <!-- Paso 2: Buscar usuario concreto o ver todos -->
+                        <div class="space-y-2">
+                            <label class="block text-[10px] font-bold text-blue-600 uppercase">
+                                <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">2</span>
+                                Usuario (profesor) <span class="text-gray-400 font-normal normal-case">(opcional: deja vacío para todos)</span>
+                            </label>
+                            <!-- Buscador por nombre -->
+                            <div class="relative">
+                                <i class="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                                <input type="text" id="report-user-search" placeholder="Buscar profesor por nombre..." class="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" oninput="filterUserSelect()">
+                            </div>
+                            <!-- Selector de usuario (filtrable por el buscador) -->
                             <select id="report-user" class="w-full border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
                                 <option value="ALL">Todos los usuarios</option>
                             </select>
@@ -1745,9 +1770,14 @@
             updateUserSelector();
         }
 
+        // Cache de listas completas para el filtro de busqueda
+        let _allStudentsForReport = [];
+        let _allUsersForReport = [];
+
         // Rellena el dropdown de alumnos del informe segun el grupo seleccionado
         function updateStudentSelector(groupFilter) {
             const sel = document.getElementById('report-student');
+            const searchInput = document.getElementById('report-student-search');
             if (!sel) return;
             const currentVal = sel.value;
             let students = allStudents;
@@ -1755,19 +1785,60 @@
                 students = students.filter(s => s.course === groupFilter);
             }
             students = [...students].sort((a, b) => a.name.localeCompare(b.name));
-            let html = '<option value="ALL">Todos los alumnos</option>';
+            // Guardar cache para el buscador
+            _allStudentsForReport = students;
+
+            // Texto de la opcion "todos" segun grupo seleccionado
+            const allLabel = (groupFilter && groupFilter !== 'ALL')
+                ? `Toda la unidad (${groupFilter})`
+                : 'Todas las unidades';
+
+            let html = `<option value="ALL">${allLabel}</option>`;
             students.forEach(s => {
                 html += `<option value="${s.id}">${s.name} (${s.course})</option>`;
             });
             sel.innerHTML = html;
             // Restaurar seleccion previa si sigue siendo valida
             if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
+            // Limpiar buscador
+            if (searchInput) searchInput.value = '';
         }
         window.updateStudentSelector = updateStudentSelector;
+
+        // Filtra el dropdown de alumnos segun el texto del buscador
+        window.filterStudentSelect = () => {
+            const searchInput = document.getElementById('report-student-search');
+            const sel = document.getElementById('report-student');
+            if (!searchInput || !sel) return;
+            const query = searchInput.value.toLowerCase().trim();
+            const currentVal = sel.value;
+            // Texto de la opcion "todos" segun grupo seleccionado (preservar)
+            const groupFilter = document.getElementById('report-group').value;
+            const allLabel = (groupFilter && groupFilter !== 'ALL')
+                ? `Toda la unidad (${groupFilter})`
+                : 'Todas las unidades';
+
+            let html = `<option value="ALL">${allLabel}</option>`;
+            const filtered = query
+                ? _allStudentsForReport.filter(s => s.name.toLowerCase().includes(query))
+                : _allStudentsForReport;
+            filtered.forEach(s => {
+                html += `<option value="${s.id}">${s.name} (${s.course})</option>`;
+            });
+            sel.innerHTML = html;
+            // Restaurar seleccion si sigue siendo valida; si no, volver a "ALL"
+            if ([...sel.options].some(o => o.value === currentVal)) {
+                sel.value = currentVal;
+            } else {
+                sel.value = 'ALL';
+                generateReport();
+            }
+        };
 
         // Rellena el dropdown de usuarios del informe (profesores/admins)
         function updateUserSelector() {
             const sel = document.getElementById('report-user');
+            const searchInput = document.getElementById('report-user-search');
             if (!sel) return;
             const currentVal = sel.value;
             // Lista de usuarios conocidos desde allUsers + cualquier userName que aparezca en logs
@@ -1780,6 +1851,9 @@
                 }
             });
             const users = [...userMap.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+            // Guardar cache para el buscador
+            _allUsersForReport = users;
+
             let html = '<option value="ALL">Todos los usuarios</option>';
             users.forEach(([id, name]) => {
                 html += `<option value="${id}">${name}</option>`;
@@ -1787,8 +1861,35 @@
             sel.innerHTML = html;
             // Restaurar seleccion previa si sigue siendo valida
             if ([...sel.options].some(o => o.value === currentVal)) sel.value = currentVal;
+            // Limpiar buscador
+            if (searchInput) searchInput.value = '';
         }
         window.updateUserSelector = updateUserSelector;
+
+        // Filtra el dropdown de usuarios segun el texto del buscador
+        window.filterUserSelect = () => {
+            const searchInput = document.getElementById('report-user-search');
+            const sel = document.getElementById('report-user');
+            if (!searchInput || !sel) return;
+            const query = searchInput.value.toLowerCase().trim();
+            const currentVal = sel.value;
+
+            let html = '<option value="ALL">Todos los usuarios</option>';
+            const filtered = query
+                ? _allUsersForReport.filter(([id, name]) => name.toLowerCase().includes(query))
+                : _allUsersForReport;
+            filtered.forEach(([id, name]) => {
+                html += `<option value="${id}">${name}</option>`;
+            });
+            sel.innerHTML = html;
+            // Restaurar seleccion si sigue siendo valida; si no, volver a "ALL"
+            if ([...sel.options].some(o => o.value === currentVal)) {
+                sel.value = currentVal;
+            } else {
+                sel.value = 'ALL';
+                generateReport();
+            }
+        };
 
         // Cambia de grupo en el informe -> actualiza lista de alumnos
         window.onReportGroupChange = () => {
