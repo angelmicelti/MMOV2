@@ -77,13 +77,31 @@
         /* Estilos para el Lector QR */
         #reader {
             width: 100%;
+            /* Altura minima para que el video siempre tenga dimensiones validas
+               aunque el contenedor padre este en flex con h-full */
+            min-height: 320px;
+            min-width: 280px;
             border-radius: 0.75rem;
             overflow: hidden;
             border: none !important;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            position: relative;
+            background: #000;
+        }
+        /* El video interno generado por html5-qrcode debe llenar el contenedor */
+        #reader video,
+        #reader__scan_region video,
+        #reader video[id^="qr-video"] {
+            width: 100% !important;
+            height: 100% !important;
+            max-height: 70vh;
+            object-fit: cover;
+            display: block !important;
+            background: #000;
         }
         #reader__scan_region {
             background: black;
+            min-height: 280px;
         }
         #reader__dashboard_section_csr button {
             background-color: #3b82f6 !important;
@@ -1011,8 +1029,19 @@
             }
 
             if (tabId === 'scanner') {
-                if (!html5QrcodeScanner) initScanner();
-                else if(!isScanningActive && !currentScannedStudent) window.startScanner();
+                if (!html5QrcodeScanner) {
+                    // Esperar 2 frames a que el div sea visible (layout estable) antes de instanciar
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            initScanner();
+                        });
+                    });
+                } else if(!isScanningActive && !currentScannedStudent) {
+                    // Esperar 1 frame a que el div vuelva a ser visible
+                    requestAnimationFrame(() => {
+                        window.startScanner();
+                    });
+                }
             } else {
                 stopScannerVisually();
             }
@@ -1236,14 +1265,22 @@
             // Si el scanner ya estaba activo, detenerlo y limpiarlo antes de re-iniciar
             // CRITICO: html5-qrcode no permite start() dos veces sin stop() entre medias
             const safeStop = async () => {
+                // Detener el scanner si esta activo (usar varias comprobaciones para compatibilidad)
                 try {
-                    if (html5QrcodeScanner && html5QrcodeScanner.isScanning) {
-                        await html5QrcodeScanner.stop();
+                    if (html5QrcodeScanner) {
+                        // Diferentes versiones exponen el estado de forma distinta
+                        const isActive = html5QrcodeScanner.isScanning
+                            || html5QrcodeScanner.getState?.() === 2 /* SCANNING */
+                            || html5QrcodeScanner.isScanning === true;
+                        if (isActive) {
+                            await html5QrcodeScanner.stop();
+                        }
                     }
                 } catch (e) {
                     // Ignorar errores de stop (scanner ya detenido, etc.)
                     console.log("stop() previo (ignorado):", e.message || e);
                 }
+                // Limpiar el DOM interno del scanner
                 try {
                     if (html5QrcodeScanner) html5QrcodeScanner.clear();
                 } catch (e) {
@@ -1305,6 +1342,40 @@
 
                 if (started) {
                     isScanningActive = true;
+                    console.log("Camara iniciada correctamente. isScanningActive =", isScanningActive);
+
+                    // Verificar que el video este realmente reproduciendose
+                    setTimeout(() => {
+                        const readerEl = document.getElementById('reader');
+                        const videoEl = readerEl ? readerEl.querySelector('video') : null;
+                        if (videoEl) {
+                            console.log("Estado del video:", {
+                                videoWidth: videoEl.videoWidth,
+                                videoHeight: videoEl.videoHeight,
+                                readyState: videoEl.readyState,
+                                paused: videoEl.paused,
+                                muted: videoEl.muted,
+                                srcObject: !!videoEl.srcObject,
+                                clientWidth: videoEl.clientWidth,
+                                clientHeight: videoEl.clientHeight,
+                                parentWidth: readerEl.clientWidth,
+                                parentHeight: readerEl.clientHeight
+                            });
+                            // Forzar play si esta pausado (algunos navegadores lo requieren)
+                            if (videoEl.paused) {
+                                console.log("Video pausado, forzando play()...");
+                                videoEl.play().catch(e => console.warn("No se pudo forzar play:", e));
+                            }
+                            if (videoEl.videoWidth === 0 || videoEl.clientWidth === 0) {
+                                console.warn("Video tiene dimensiones 0. Forzando layout...");
+                                readerEl.style.minHeight = '320px';
+                                readerEl.style.minWidth = '280px';
+                            }
+                        } else {
+                            console.warn("No se encontro elemento <video> dentro de #reader");
+                            console.log("Contenido de #reader:", readerEl ? readerEl.innerHTML.substring(0, 500) : 'reader no existe');
+                        }
+                    }, 500);
                 } else {
                     throw lastError || new Error("No se pudo iniciar ninguna camara");
                 }
