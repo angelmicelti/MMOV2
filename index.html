@@ -119,10 +119,24 @@
         
         /* Impresión de carnets y reportes */
         @media print {
+            /* Ocultar todo menos el area de impresion */
             body * { visibility: hidden; }
             #print-area, #print-area * { visibility: visible; }
-            #print-area { position: absolute; left: 0; top: 0; width: 100%; display: block; }
+            /* Posicionar el area de impresion al inicio del flujo */
+            #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                display: block !important;
+                background: white;
+            }
             .no-print { display: none !important; }
+            /* Asegurar que los colores de fondo se impriman (QR) */
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
         }
     </style>
 </head>
@@ -1453,39 +1467,169 @@
             if (studentsToPrint.length === 0) return showToast("No hay alumnos.");
 
             const printArea = document.getElementById('print-area');
-            printArea.innerHTML = ''; 
+            printArea.innerHTML = '';
+
+            // CSS de impresion robusto:
+            // - Usa layout flex explicito en lugar de grid (mas predecible en print)
+            // - box-sizing: border-box para que padding no cause overflow
+            // - CSS especifico para la <table> que genera qrcodejs internamente
+            // - Salto de pagina controlado cada 4 cards (2 filas x 2 columnas)
+            // - break-inside: avoid (sintaxis moderna) + page-break-inside: avoid (legacy)
             const style = document.createElement('style');
-            style.innerHTML = `@page { size: A4; margin: 1cm; } .qr-grid-wrapper { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; width: 100%; } .card { border: 2px dashed #ccc; padding: 20px; text-align: center; height: 320px; display: flex; flex-direction: column; justify-content: center; align-items: center; page-break-inside: avoid; } .card-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; } .card-course { font-size: 13px; color: #666; margin-bottom: 15px; } .qr-container { background: white; padding: 16px; border: 1px solid #eee; border-radius: 8px; line-height: 0; } .qr-container img, .qr-container canvas { display: block !important; image-rendering: pixelated; image-rendering: crisp-edges; }`;
+            style.innerHTML = `
+                @page { size: A4; margin: 1cm; }
+                * { box-sizing: border-box; }
+                .qr-print-page {
+                    display: flex;
+                    flex-wrap: wrap;
+                    width: 100%;
+                    gap: 8px;
+                    align-items: stretch;
+                    align-content: flex-start;
+                }
+                .qr-card {
+                    width: calc(50% - 4px);
+                    min-height: 320px;
+                    max-height: 340px;
+                    border: 2px dashed #aaa;
+                    border-radius: 8px;
+                    padding: 14px;
+                    text-align: center;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    overflow: hidden;
+                    break-inside: avoid;
+                    page-break-inside: avoid;
+                    page-break-after: auto;
+                }
+                /* Cada 4 cards (2 filas), forzar salto de pagina tras la 4ta, 8va, etc */
+                .qr-card:nth-child(4n) {
+                    page-break-after: always;
+                    break-after: page;
+                }
+                /* La ultima card no debe forzar salto (evita pagina en blanco final) */
+                .qr-card:last-child {
+                    page-break-after: auto;
+                    break-after: auto;
+                }
+                .qr-card-title {
+                    font-size: 15px;
+                    font-weight: bold;
+                    margin-bottom: 4px;
+                    color: #1f2937;
+                    line-height: 1.2;
+                    max-width: 100%;
+                    word-break: break-word;
+                }
+                .qr-card-course {
+                    font-size: 12px;
+                    color: #666;
+                    margin-bottom: 10px;
+                    font-weight: 500;
+                }
+                .qr-container {
+                    background: white;
+                    padding: 10px;
+                    border: 1px solid #ddd;
+                    border-radius: 6px;
+                    line-height: 0;
+                    display: inline-block;
+                }
+                /* qrcodejs genera una <table> internamente; hay que resetear su CSS */
+                .qr-container table {
+                    border-collapse: collapse;
+                    margin: 0 auto;
+                    background: white;
+                }
+                .qr-container table td {
+                    border: none;
+                    padding: 0;
+                    margin: 0;
+                    width: 5px;
+                    height: 5px;
+                    line-height: 0;
+                    font-size: 0;
+                }
+                .qr-container table td.black { background: #000; }
+                .qr-container table td.white { background: #fff; }
+                /* Por si la libreria usa img/canvas en algunos navegadores */
+                .qr-container img,
+                .qr-container canvas {
+                    display: block !important;
+                    margin: 0 auto;
+                    image-rendering: pixelated;
+                    image-rendering: crisp-edges;
+                    max-width: 100%;
+                    height: auto;
+                }
+            `;
             printArea.appendChild(style);
-            
-            const gridWrapper = document.createElement('div');
-            gridWrapper.className = 'qr-grid-wrapper';
 
+            const pageWrapper = document.createElement('div');
+            pageWrapper.className = 'qr-print-page';
+
+            // Generar cada card y su QR
+            const qrPromises = [];
             studentsToPrint.forEach(s => {
-                const card = document.createElement('div'); card.className = 'card';
-                card.innerHTML = `<div class="card-title">${s.name}</div><div class="card-course">PISAPORTE - ${s.course}</div>`;
-                const qrContainer = document.createElement('div'); qrContainer.className = 'qr-container';
-                card.appendChild(qrContainer);
-                gridWrapper.appendChild(card);
-                // Nivel H = alta correccion de errores (30%), facilita lectura con arrugas/reflejos
-                // Tamano 200x200 con renderizado nitido via canvas
-                new QRCode(qrContainer, {
-                    text: s.id,
-                    width: 200,
-                    height: 200,
-                    colorDark: "#000000",
-                    colorLight: "#ffffff",
-                    correctLevel: QRCode.CorrectLevel.H
-                });
-            });
-            printArea.appendChild(gridWrapper);
+                const card = document.createElement('div');
+                card.className = 'qr-card';
+                const titleEl = document.createElement('div');
+                titleEl.className = 'qr-card-title';
+                titleEl.textContent = s.name;
+                const courseEl = document.createElement('div');
+                courseEl.className = 'qr-card-course';
+                courseEl.textContent = 'PISAPORTE - ' + s.course;
+                const qrContainer = document.createElement('div');
+                qrContainer.className = 'qr-container';
 
+                card.appendChild(titleEl);
+                card.appendChild(courseEl);
+                card.appendChild(qrContainer);
+                pageWrapper.appendChild(card);
+
+                // Generar QR y devolver una promesa que se resuelve cuando el QR esta en el DOM
+                const promise = new Promise((resolve) => {
+                    try {
+                        new QRCode(qrContainer, {
+                            text: s.id,
+                            width: 180,
+                            height: 180,
+                            colorDark: "#000000",
+                            colorLight: "#ffffff",
+                            correctLevel: QRCode.CorrectLevel.H
+                        });
+                        // qrcodejs renderiza sincronamente la <table>, pero damos un microtask
+                        // para asegurar que el DOM este actualizado
+                        setTimeout(resolve, 10);
+                    } catch (e) {
+                        console.error("Error generando QR para", s.name, e);
+                        qrContainer.innerHTML = '<div style="color:red;font-size:10px;">Error QR</div>';
+                        resolve();
+                    }
+                });
+                qrPromises.push(promise);
+            });
+            printArea.appendChild(pageWrapper);
+
+            // Esperar a que TODOS los QR esten renderizados antes de imprimir
             const originalTitle = document.title;
             document.title = `PisaporteV2_QRs_${formatGroupNameForFile(filter)}`;
-            setTimeout(() => {
-                window.print();
-                setTimeout(() => { document.title = originalTitle; }, 1000);
-            }, 500);
+
+            Promise.all(qrPromises).then(() => {
+                // Doble verificacion: esperar un frame mas para que el layout se asiente
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        window.print();
+                        setTimeout(() => {
+                            document.title = originalTitle;
+                            // Limpiar el area de impresion para liberar memoria
+                            printArea.innerHTML = '';
+                        }, 1000);
+                    });
+                });
+            });
         };
 
         // ================= ELIMINACIÓN GENERAL =================
