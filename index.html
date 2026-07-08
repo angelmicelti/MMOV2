@@ -1964,8 +1964,12 @@
         };
 
         // ================= BOTONERA DE UNIDADES (seleccion multiple) =================
-        // Estado de unidades seleccionadas (Set de nombres de unidad)
-        let _selectedUnits = new Set(); // vacio = todas seleccionadas
+        // Estado de unidades seleccionadas:
+        //   _selectedUnits: Set con los nombres de las unidades seleccionadas
+        //   _allUnitsSelected: true = todas seleccionadas (ignora _selectedUnits)
+        //                      false = solo las de _selectedUnits (puede estar vacio = ninguna)
+        let _selectedUnits = new Set();
+        let _allUnitsSelected = true; // al iniciar, todas seleccionadas
 
         // Rellena la botonera de unidades con los grupos disponibles
         function renderUnitsButtons() {
@@ -1975,6 +1979,7 @@
                 // Tutores: solo ven su grupo, no pueden elegir otros
                 container.innerHTML = `<span class="text-xs text-gray-500 italic">Tu grupo: ${currentAppUser.tutorGroup}</span>`;
                 _selectedUnits = new Set([currentAppUser.tutorGroup]);
+                _allUnitsSelected = false;
                 return;
             }
             const groups = [...new Set(allStudents.map(s => s.course))].sort();
@@ -1988,12 +1993,9 @@
                 btn.type = 'button';
                 btn.dataset.unit = g;
                 btn.textContent = g;
-                // Clase base del boton (sin estado selected/no-selected)
                 btn.className = 'unit-btn px-3 py-1.5 rounded-full text-xs font-bold border transition-colors';
-                // Estado inicial: si _selectedUnits esta vacio, todas seleccionadas
-                const isSelected = _selectedUnits.size === 0 || _selectedUnits.has(g);
-                // IMPORTANTE: classList.add requiere cada clase como argumento separado
-                // (no acepta strings con espacios)
+                // Estado inicial: si _allUnitsSelected, todas seleccionadas
+                const isSelected = _allUnitsSelected || _selectedUnits.has(g);
                 if (isSelected) {
                     btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
                 } else {
@@ -2006,25 +2008,24 @@
         window.renderUnitsButtons = renderUnitsButtons;
 
         // Toggle de seleccion de una unidad
+        // Comportamiento:
+        //   - Si "_allUnitsSelected" (todas) y se clica una -> solo esa queda seleccionada
+        //   - Si una unidad NO esta seleccionada -> se anyade
+        //   - Si una unidad SI esta seleccionada -> se quita (aunque quede vacio = "ninguna")
         window.toggleUnitButton = (unitName) => {
-            if (_selectedUnits.size === 0) {
+            if (_allUnitsSelected) {
                 // Todas estaban seleccionadas: al clicar una, seleccionamos SOLO esa
-                _selectedUnits = new Set();
-                // Recoger todas las unidades actuales y marcar solo la clicada
                 const allButtons = document.querySelectorAll('#report-units-buttons .unit-btn');
+                _selectedUnits = new Set();
                 allButtons.forEach(b => {
-                    if (b.dataset.unit !== unitName) {
-                        // pasar a no seleccionado visualmente
+                    if (b.dataset.unit === unitName) {
+                        _selectedUnits.add(unitName);
                     }
                 });
-                _selectedUnits.add(unitName);
+                _allUnitsSelected = false;
             } else if (_selectedUnits.has(unitName)) {
-                // Ya estaba seleccionada: la quitamos
+                // Ya estaba seleccionada: la quitamos (permitiendo set vacio = ninguna)
                 _selectedUnits.delete(unitName);
-                // Si queda vacio, volver a "todas seleccionadas"
-                if (_selectedUnits.size === 0) {
-                    _selectedUnits = new Set(); // vacio = todas
-                }
             } else {
                 // No estaba: la anyadimos
                 _selectedUnits.add(unitName);
@@ -2039,11 +2040,11 @@
         // Seleccionar todas o ninguna unidad
         window.selectAllUnits = (selectAll) => {
             if (selectAll) {
-                _selectedUnits = new Set(); // vacio = todas seleccionadas
+                _allUnitsSelected = true;
+                _selectedUnits = new Set();
             } else {
-                // Ninguna: marcamos como seleccionado un set con un elemento imposible
-                // para que ningun alumno se muestre (efecto "ninguna")
-                _selectedUnits = new Set(['__NONE__']);
+                _allUnitsSelected = false;
+                _selectedUnits = new Set(); // vacio = ninguna
             }
             updateUnitsButtonsVisual();
             updateStudentSelectorForSelectedUnits();
@@ -2055,7 +2056,7 @@
             const buttons = document.querySelectorAll('#report-units-buttons .unit-btn');
             buttons.forEach(btn => {
                 const g = btn.dataset.unit;
-                const isSelected = _selectedUnits.size === 0 || _selectedUnits.has(g);
+                const isSelected = _allUnitsSelected || _selectedUnits.has(g);
                 btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600',
                     'bg-white', 'text-gray-500', 'border-gray-300', 'hover:bg-gray-50');
                 if (isSelected) {
@@ -2067,12 +2068,12 @@
         }
 
         // Devuelve la lista de unidades seleccionadas para filtrar logs
-        // Si _selectedUnits esta vacio -> null (todas las unidades)
-        // Si contiene '__NONE__' -> [] (ninguna)
+        //   null  = todas las unidades (no filtrar)
+        //   []    = ninguna unidad (filtrar todo a vacio)
+        //   [...] = lista de unidades concretas
         function getSelectedUnitsForFilter() {
-            if (_selectedUnits.size === 0) return null; // todas
-            if (_selectedUnits.has('__NONE__')) return []; // ninguna
-            return [..._selectedUnits];
+            if (_allUnitsSelected) return null; // todas
+            return [..._selectedUnits]; // puede ser vacio = ninguna
         }
         window.getSelectedUnitsForFilter = getSelectedUnitsForFilter;
 
@@ -2086,7 +2087,7 @@
             const units = getSelectedUnitsForFilter();
             let students = allStudents;
             if (units !== null) {
-                // units es array (posiblemente vacio)
+                // units es array (puede ser vacio si "ninguna")
                 students = students.filter(s => units.includes(s.course));
             }
             students = [...students].sort((a, b) => a.name.localeCompare(b.name));
