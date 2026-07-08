@@ -471,10 +471,30 @@
         </div>
     </div>
 
+    <!-- Boton flotante de diagnostico Firebase (esquina inferior derecha) -->
+    <button id="fb-debug-btn" onclick="window.toggleFBDebug()" class="fixed bottom-20 right-3 z-40 bg-gray-700 text-white rounded-full w-10 h-10 flex items-center justify-center shadow-lg hover:bg-gray-800 no-print" title="Diagnostico Firebase">
+        <i class="fa-solid fa-stethoscope text-xs"></i>
+    </button>
+
+    <!-- Panel de diagnostico Firebase -->
+    <div id="fb-debug-panel" class="fixed inset-0 bg-black bg-opacity-50 z-50 items-center justify-center no-print" style="display: none;">
+        <div class="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-800">Diagnostico Firebase</h3>
+                <button onclick="window.toggleFBDebug()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="fb-debug-content" class="text-xs text-gray-700 space-y-2 font-mono"></div>
+            <div class="flex gap-2 mt-4">
+                <button onclick="window.location.reload()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium">Recargar</button>
+                <button onclick="window.toggleFBDebug()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg text-sm font-medium">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ================= CONFIGURACIÓN FIREBASE =================
         const userFirebaseConfig = {
@@ -500,11 +520,21 @@
         let allLogs = [];
         let allUsers = [];              // Usuarios DB
         let currentAppUser = null;      // Perfil del usuario logueado en la PWA
-        window.currentFilteredLogs = []; 
+        window.currentFilteredLogs = [];
         let html5QrcodeScanner = null;
         let isScanningActive = false;
         let currentScannedStudent = null;
         let isAppInitialized = false;
+
+        // Diagnostico Firebase (visible para el usuario via consola y panel)
+        window.__firebaseDebug = {
+            appId,
+            config: { projectId: firebaseConfig.projectId, authDomain: firebaseConfig.authDomain },
+            authUid: null,
+            collectionsLoaded: { users: false, students: false, logs: false },
+            counts: { users: 0, students: 0, logs: 0 },
+            lastErrors: []
+        };
 
         // ================= INICIALIZACIÓN Y AUTH FIREBASE =================
         const hideLoading = () => {
@@ -512,17 +542,38 @@
             if (overlay) overlay.style.display = 'none';
         };
 
+        // Habilitar persistencia offline de Firestore (IndexedDB)
+        // Permite que los datos se guarden en el navegador y se sincronicen al recuperar conexion
+        try {
+            enableIndexedDbPersistence(db).catch((err) => {
+                console.warn("No se pudo habilitar persistencia offline de Firestore:", err.code, err.message);
+                window.__firebaseDebug.lastErrors.push({ type: 'persistence', code: err.code, message: err.message, ts: Date.now() });
+            });
+        } catch (e) {
+            console.warn("enableIndexedDbPersistence no disponible:", e);
+        }
+
+        // Forzar persistencia LOCAL de Auth (sobrevive al cierre del navegador)
+        // Esto es CRITICO para que la sesion anónima sea la misma entre recargas
+        setPersistence(auth, browserLocalPersistence).catch((err) => {
+            console.warn("No se pudo establecer persistencia local de Auth:", err);
+            window.__firebaseDebug.lastErrors.push({ type: 'auth_persistence', message: String(err), ts: Date.now() });
+        });
+
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
+                    // signInAnonymously reutiliza la sesion anonima existente si la hay
+                    // (gracias a browserLocalPersistence)
                     await signInAnonymously(auth);
                 }
             } catch (error) {
                 console.error("Error Auth detallado:", error);
+                window.__firebaseDebug.lastErrors.push({ type: 'auth', code: error.code, message: error.message, ts: Date.now() });
                 hideLoading();
-                showToast("Fallo de conexión segura. Intente recargar.");
+                showToast("Fallo de conexion segura. Intente recargar. Cod: " + (error.code || 'desconocido'));
             }
         };
 
@@ -531,7 +582,12 @@
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 currentUser = user;
+                window.__firebaseDebug.authUid = user.uid;
+                console.log("Auth OK. UID anonimo:", user.uid, "(compartido entre navegadores que usen el mismo projectId)");
                 setupRealtimeListeners();
+            } else {
+                console.warn("Auth: usuario no logueado. Reintentando signInAnonymously en 2s...");
+                setTimeout(initAuth, 2000);
             }
         });
 
@@ -540,18 +596,67 @@
             const overlay = document.getElementById('loading-overlay');
             if(overlay && overlay.style.display !== 'none' && !isAppInitialized) {
                 hideLoading();
-                showToast("Aviso: Conexión muy lenta.");
+                showToast("Aviso: Conexion muy lenta. Revisa la consola (F12).");
+                console.warn("Firebase no respondio en 5s. Estado actual:", window.__firebaseDebug);
             }
         }, 5000);
 
         function setupRealtimeListeners() {
             if (!currentUser) return;
 
+            console.log("Configurando listeners Firestore. appId:", appId);
+            console.log("Ruta base: artifacts/" + appId + "/public/data/pisaporte_*");
+
+            // Wrapper con reconexion automatica para onSnapshot
+            function watchCollection(name, ref, callback) {
+                let unsub = null;
+                let reconnectAttempts = 0;
+                const maxAttempts = 5;
+
+                function start() {
+                    unsub = onSnapshot(ref, (snapshot) => {
+                        reconnectAttempts = 0; // reset al recibir datos OK
+                        window.__firebaseDebug.collectionsLoaded[name] = true;
+                        window.__firebaseDebug.counts[name] = snapshot.size;
+                        console.log(`[${name}] Snapshot OK: ${snapshot.size} documentos`);
+                        callback(snapshot);
+                    }, (error) => {
+                        console.error(`Error loading ${name}:`, error.code, error.message);
+                        window.__firebaseDebug.lastErrors.push({
+                            type: 'snapshot_' + name,
+                            code: error.code,
+                            message: error.message,
+                            ts: Date.now()
+                        });
+
+                        // Si es error de permisos, no reintentar (no se arreglara solo)
+                        if (error.code === 'permission-denied') {
+                            showToast(`Sin permisos para leer ${name}. Revisa las reglas de Firestore.`);
+                            return;
+                        }
+
+                        // Reconexion con backoff exponencial para otros errores
+                        if (reconnectAttempts < maxAttempts) {
+                            reconnectAttempts++;
+                            const delay = Math.min(30000, 2000 * Math.pow(2, reconnectAttempts - 1));
+                            console.warn(`[${name}] Reintentando en ${delay/1000}s (intento ${reconnectAttempts}/${maxAttempts})...`);
+                            setTimeout(() => {
+                                if (unsub) try { unsub(); } catch(e) {}
+                                start();
+                            }, delay);
+                        } else {
+                            showToast(`No se pudo sincronizar ${name} tras ${maxAttempts} intentos. Recarga la pagina.`);
+                        }
+                    });
+                }
+                start();
+            }
+
             // Escuchar usuarios
             const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users');
-            onSnapshot(usersRef, (snapshot) => {
+            watchCollection('users', usersRef, (snapshot) => {
                 allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                
+
                 if (!isAppInitialized) {
                     hideLoading();
                     isAppInitialized = true;
@@ -579,24 +684,26 @@
                         }
                     }
                 }
-            }, (error) => console.error("Error loading users:", error));
+            });
 
             const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students');
-            onSnapshot(studentsRef, (snapshot) => {
+            watchCollection('students', studentsRef, (snapshot) => {
                 allStudents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                console.log(`Alumnos cargados: ${allStudents.length}. Cursos disponibles:`,
+                    [...new Set(allStudents.map(s => s.course))]);
                 updateGroupSelectors();
                 if (!document.getElementById('view-students').classList.contains('hidden')) {
                     renderStudentsList();
                 }
-            }, (error) => console.error("Error loading students:", error));
+            });
 
             const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs');
-            onSnapshot(logsRef, (snapshot) => {
+            watchCollection('logs', logsRef, (snapshot) => {
                 allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 if (!document.getElementById('view-reports').classList.contains('hidden')) {
                     generateReport();
                 }
-            }, (error) => console.error("Error loading logs:", error));
+            });
         }
 
         // ================= SISTEMA DE LOGIN (PWA) =================
@@ -1461,6 +1568,50 @@
             toast.style.opacity = '1';
             setTimeout(() => { toast.style.opacity = '0'; }, 5000);
         }
+
+        // ================= PANEL DE DIAGNOSTICO FIREBASE =================
+        // Permite al usuario ver el estado de la sincronizacion sin abrir la consola
+        window.toggleFBDebug = () => {
+            const panel = document.getElementById('fb-debug-panel');
+            const content = document.getElementById('fb-debug-content');
+            const debug = window.__firebaseDebug || {};
+
+            if (panel.style.display === 'none' || !panel.style.display) {
+                // Construir contenido
+                const status = (ok) => ok ? '<span class="text-green-600 font-bold">OK</span>' : '<span class="text-red-600 font-bold">NO</span>';
+                const counts = debug.counts || {};
+                const loaded = debug.collectionsLoaded || {};
+                const errors = debug.lastErrors || [];
+
+                let html = '';
+                html += `<div><b>Project ID:</b> ${(debug.config || {}).projectId || '?'}</div>`;
+                html += `<div><b>Auth Domain:</b> ${(debug.config || {}).authDomain || '?'}</div>`;
+                html += `<div><b>App ID:</b> ${debug.appId || '?'}</div>`;
+                html += `<div><b>UID anonimo:</b> ${debug.authUid || '(no autenticado)'}</div>`;
+                html += `<div class="border-t pt-2 mt-2"><b>Colecciones:</b></div>`;
+                html += `<div>- users: ${status(loaded.users)} (${counts.users || 0} docs)</div>`;
+                html += `<div>- students: ${status(loaded.students)} (${counts.students || 0} docs)</div>`;
+                html += `<div>- logs: ${status(loaded.logs)} (${counts.logs || 0} docs)</div>`;
+
+                if (errors.length > 0) {
+                    html += `<div class="border-t pt-2 mt-2"><b>Ultimos errores (${errors.length}):</b></div>`;
+                    errors.slice(-5).forEach(e => {
+                        const d = new Date(e.ts).toLocaleTimeString();
+                        html += `<div class="text-red-600">[${d}] ${e.type}: ${e.code || ''} ${e.message || ''}</div>`;
+                    });
+                } else {
+                    html += `<div class="border-t pt-2 mt-2 text-green-600">Sin errores registrados.</div>`;
+                }
+
+                html += `<div class="border-t pt-2 mt-2 text-gray-500">Ruta: artifacts/${debug.appId}/public/data/pisaporte_*</div>`;
+                html += `<div class="text-gray-500">Si ves 0 docs en students pero ayer habia datos, probablemente las reglas de Firestore estan bloqueando la lectura. Revisa la consola Firebase.</div>`;
+
+                content.innerHTML = html;
+                panel.style.display = 'flex';
+            } else {
+                panel.style.display = 'none';
+            }
+        };
 
     </script>
 </body>
