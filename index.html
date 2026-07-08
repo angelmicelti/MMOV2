@@ -238,9 +238,21 @@
                     <h2 class="text-lg font-bold text-gray-700">Control de Accesos</h2>
                     <p class="text-sm text-gray-500">Enfoca el carnet del alumno para registrar la salida.</p>
                 </div>
+
+                <!-- Selector de camara (util en PC con varias webcams / camaras virtuales) -->
+                <div class="max-w-md mx-auto w-full mb-3 flex gap-2 items-center">
+                    <select id="camera-select" class="flex-1 border border-gray-300 rounded-lg p-2 text-sm bg-white" onchange="window.startScanner()">
+                        <option value="">Cargando cámaras...</option>
+                    </select>
+                    <button id="switch-camera-btn" onclick="window.switchToNextCamera()" class="bg-blue-100 text-blue-700 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-colors" title="Cambiar cámara">
+                        <i class="fa-solid fa-camera-rotate"></i>
+                    </button>
+                </div>
+
                 <div class="flex-1 flex flex-col justify-center items-center">
                     <div id="reader" class="w-full max-w-md mx-auto"></div>
-                    <button id="restart-scanner-btn" class="mt-6 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold shadow hidden" onclick="startScanner()">
+                    <p id="active-camera-name" class="text-xs text-gray-400 mt-2 text-center"></p>
+                    <button id="restart-scanner-btn" class="mt-4 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold shadow hidden" onclick="startScanner()">
                         <i class="fa-solid fa-camera-rotate"></i> Reiniciar Cámara
                     </button>
                 </div>
@@ -1224,6 +1236,69 @@
             }
         }
 
+        // ================= ESCÁNER QR =================
+        // Estado global para gestion de camaras
+        let availableVideoDevices = []; // Lista de {deviceId, label} para el selector
+        let lastUsedCameraConstraints = null; // Para recordar que camara se uso
+
+        // Rellena el dropdown de camaras con los dispositivos disponibles
+        async function populateCameraSelector() {
+            const select = document.getElementById('camera-select');
+            if (!select) return;
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                availableVideoDevices = devices.filter(d => d.kind === 'videoinput');
+                select.innerHTML = '';
+
+                // Opcion "auto" (deja que la app elija segun movil/PC)
+                const autoOpt = document.createElement('option');
+                autoOpt.value = 'auto';
+                autoOpt.textContent = '🔄 Automática';
+                select.appendChild(autoOpt);
+
+                // Una opcion por cada camara encontrada
+                availableVideoDevices.forEach((d, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = d.deviceId;
+                    // Si la camara no tiene etiqueta (permisos aun no concedidos), mostrar generico
+                    let label = d.label || `Cámara ${i + 1}`;
+                    // Acortar etiquetas muy largas
+                    if (label.length > 40) label = label.substring(0, 40) + '...';
+                    opt.textContent = label;
+                    select.appendChild(opt);
+                });
+
+                console.log(`Selector de camaras: ${availableVideoDevices.length} dispositivo(s) disponible(s)`);
+            } catch (e) {
+                console.warn("No se pudo enumerar dispositivos para el selector:", e);
+                select.innerHTML = '<option value="auto">🔄 Automática</option>';
+            }
+        }
+        window.populateCameraSelector = populateCameraSelector;
+
+        // Cambia a la siguiente camara del dropdown (botón "Cambiar cámara")
+        window.switchToNextCamera = () => {
+            const select = document.getElementById('camera-select');
+            if (!select || select.options.length < 2) return;
+            // Si esta en "auto", ir al primer dispositivo; si no, avanzar al siguiente
+            let nextIdx;
+            if (select.selectedIndex === 0) {
+                nextIdx = 1; // primer dispositivo real
+            } else {
+                nextIdx = (select.selectedIndex + 1) % select.options.length;
+                if (nextIdx === 0) nextIdx = 1; // saltar "auto"
+            }
+            select.selectedIndex = nextIdx;
+            window.startScanner();
+        };
+
+        function initScanner() {
+            html5QrcodeScanner = new Html5Qrcode("reader");
+            if (document.getElementById('view-scanner').classList.contains('hidden') === false) {
+                startScanner();
+            }
+        }
+
         window.startScanner = async () => {
             if (!html5QrcodeScanner) return;
             document.getElementById('restart-scanner-btn').classList.add('hidden');
@@ -1236,12 +1311,15 @@
                 return;
             }
 
-            // Detectar si es movil (tacto + pantalla pequena) para elegir camara
+            // Detectar si es movil
             const isMobile = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent)
                 || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
             console.log("Dispositivo detectado como:", isMobile ? "MOVIL" : "PC/DESKTOP");
 
-            // qrbox adaptativo: 70% del min(ancho, alto) del video, con minimo 200x200
+            // Asegurar que el selector de camaras este relleno (necesita permiso concedido)
+            await populateCameraSelector();
+
+            // qrbox adaptativo
             const qrboxFn = (viewfinderWidth, viewfinderHeight) => {
                 const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
                 const size = Math.max(200, Math.floor(minEdge * 0.7));
@@ -1262,25 +1340,20 @@
                 }
             };
 
-            // Si el scanner ya estaba activo, detenerlo y limpiarlo antes de re-iniciar
-            // CRITICO: html5-qrcode no permite start() dos veces sin stop() entre medias
+            // Detener el scanner previo si estaba activo
             const safeStop = async () => {
-                // Detener el scanner si esta activo (usar varias comprobaciones para compatibilidad)
                 try {
                     if (html5QrcodeScanner) {
-                        // Diferentes versiones exponen el estado de forma distinta
                         const isActive = html5QrcodeScanner.isScanning
-                            || html5QrcodeScanner.getState?.() === 2 /* SCANNING */
+                            || html5QrcodeScanner.getState?.() === 2
                             || html5QrcodeScanner.isScanning === true;
                         if (isActive) {
                             await html5QrcodeScanner.stop();
                         }
                     }
                 } catch (e) {
-                    // Ignorar errores de stop (scanner ya detenido, etc.)
                     console.log("stop() previo (ignorado):", e.message || e);
                 }
-                // Limpiar el DOM interno del scanner
                 try {
                     if (html5QrcodeScanner) html5QrcodeScanner.clear();
                 } catch (e) {
@@ -1288,27 +1361,77 @@
                 }
             };
 
-            // Construir lista de camaras a probar en orden
+            // Filtrar camaras virtuales (Mirametrix, OBS Virtual Camera, etc.)
+            // que muestran pantallas negras o avatares en lugar de la webcam real
+            const isVirtualCamera = (label) => {
+                if (!label) return false;
+                const l = label.toLowerCase();
+                return l.includes('virtual') || l.includes('mirametrix') || l.includes('obs ')
+                    || l.includes('manycam') || l.includes('snap') || l.includes('droidcam')
+                    || l.includes('ivcam') || l.includes('camo ');
+            };
+
+            // Construir lista de camaras a probar segun seleccion del usuario
             const buildCameraCandidates = async () => {
+                const select = document.getElementById('camera-select');
+                const selectedValue = select ? select.value : 'auto';
                 const candidates = [];
-                if (isMobile) {
-                    // Movil: preferir trasera, luego frontal
-                    candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
-                    candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
-                } else {
-                    // PC: preferir frontal, luego cualquier camara disponible
-                    candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
-                    candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
+
+                if (selectedValue && selectedValue !== 'auto') {
+                    // Usuario eligio una camara concreta: usar esa primera
+                    const dev = availableVideoDevices.find(d => d.deviceId === selectedValue);
+                    if (dev) {
+                        candidates.push({
+                            label: dev.label || `dispositivo ${dev.deviceId.substring(0, 8)}`,
+                            constraints: { deviceId: { exact: dev.deviceId } }
+                        });
+                    }
                 }
-                // Ultimo recurso: enumerar dispositivos y usar el primero por deviceId
+
+                if (selectedValue === 'auto' || !selectedValue) {
+                    // Auto: priorizar camaras reales segun dispositivo
+                    if (isMobile) {
+                        candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
+                        candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
+                    } else {
+                        // PC: preferir facingMode user, luego environment
+                        candidates.push({ label: "frontal (user)", constraints: { facingMode: { ideal: "user" } } });
+                        candidates.push({ label: "trasera (environment)", constraints: { facingMode: { ideal: "environment" } } });
+                    }
+                }
+
+                // Fallback: enumerar dispositivos y anadirlos (excepto los virtuales y los ya anadidos)
+                // Esto sirve si facingMode no funciona y la camara elegida no esta disponible
                 try {
                     const devices = await navigator.mediaDevices.enumerateDevices();
                     const videoDevices = devices.filter(d => d.kind === 'videoinput');
-                    videoDevices.forEach((d, i) => {
-                        candidates.push({
-                            label: `dispositivo ${i + 1} (${d.label || d.deviceId.substring(0, 8)})`,
-                            constraints: { deviceId: { exact: d.deviceId } }
-                        });
+                    // Primero camaras reales (no virtuales)
+                    videoDevices.forEach((d) => {
+                        if (!isVirtualCamera(d.label)) {
+                            const alreadyAdded = candidates.some(c =>
+                                c.constraints.deviceId && c.constraints.deviceId.exact === d.deviceId
+                            );
+                            if (!alreadyAdded) {
+                                candidates.push({
+                                    label: d.label || `dispositivo ${d.deviceId.substring(0, 8)}`,
+                                    constraints: { deviceId: { exact: d.deviceId } }
+                                });
+                            }
+                        }
+                    });
+                    // Luego camaras virtuales como ultimo recurso
+                    videoDevices.forEach((d) => {
+                        if (isVirtualCamera(d.label)) {
+                            const alreadyAdded = candidates.some(c =>
+                                c.constraints.deviceId && c.constraints.deviceId.exact === d.deviceId
+                            );
+                            if (!alreadyAdded) {
+                                candidates.push({
+                                    label: d.label || `dispositivo virtual ${d.deviceId.substring(0, 8)}`,
+                                    constraints: { deviceId: { exact: d.deviceId } }
+                                });
+                            }
+                        }
                     });
                 } catch (e) {
                     console.warn("No se pudo enumerar dispositivos:", e);
@@ -1323,6 +1446,7 @@
 
                 let lastError = null;
                 let started = false;
+                let startedLabel = null;
 
                 for (const candidate of candidates) {
                     try {
@@ -1331,11 +1455,12 @@
                         await html5QrcodeScanner.start(candidate.constraints, config, onScanSuccess, onScanFailure);
                         console.log(`Camara iniciada OK: ${candidate.label}`);
                         started = true;
+                        startedLabel = candidate.label;
+                        lastUsedCameraConstraints = candidate.constraints;
                         break;
                     } catch (err) {
                         console.warn(`Fallo camara ${candidate.label}:`, err.name || err.code, err.message || '');
                         lastError = err;
-                        // Limpiar el scanner antes del siguiente intento
                         await safeStop();
                     }
                 }
@@ -1343,6 +1468,12 @@
                 if (started) {
                     isScanningActive = true;
                     console.log("Camara iniciada correctamente. isScanningActive =", isScanningActive);
+
+                    // Mostrar nombre de la camara activa en la UI
+                    const activeCamEl = document.getElementById('active-camera-name');
+                    if (activeCamEl) {
+                        activeCamEl.textContent = `📷 Cámara activa: ${startedLabel}`;
+                    }
 
                     // Verificar que el video este realmente reproduciendose
                     setTimeout(() => {
@@ -1354,26 +1485,15 @@
                                 videoHeight: videoEl.videoHeight,
                                 readyState: videoEl.readyState,
                                 paused: videoEl.paused,
-                                muted: videoEl.muted,
-                                srcObject: !!videoEl.srcObject,
                                 clientWidth: videoEl.clientWidth,
-                                clientHeight: videoEl.clientHeight,
-                                parentWidth: readerEl.clientWidth,
-                                parentHeight: readerEl.clientHeight
+                                clientHeight: videoEl.clientHeight
                             });
-                            // Forzar play si esta pausado (algunos navegadores lo requieren)
                             if (videoEl.paused) {
                                 console.log("Video pausado, forzando play()...");
                                 videoEl.play().catch(e => console.warn("No se pudo forzar play:", e));
                             }
-                            if (videoEl.videoWidth === 0 || videoEl.clientWidth === 0) {
-                                console.warn("Video tiene dimensiones 0. Forzando layout...");
-                                readerEl.style.minHeight = '320px';
-                                readerEl.style.minWidth = '280px';
-                            }
                         } else {
                             console.warn("No se encontro elemento <video> dentro de #reader");
-                            console.log("Contenido de #reader:", readerEl ? readerEl.innerHTML.substring(0, 500) : 'reader no existe');
                         }
                     }, 500);
                 } else {
