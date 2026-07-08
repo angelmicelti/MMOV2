@@ -1455,37 +1455,38 @@
             const printArea = document.getElementById('print-area');
             printArea.innerHTML = '';
 
-            // CSS de impresion: 6 carnets por pagina A4 (3 columnas x 2 filas)
-            // - Layout flex con gap amplio para separar claramente las cards
+            // CSS de impresion: tarjetas formato credito (ISO/IEC 7810 ID-1)
+            // Dimensiones fisicas: 85.6mm x 54mm (relacion 1.586:1)
+            // Caben 8 por pagina A4 (2 columnas x 4 filas) con margenes de corte
+            //
+            // Layout horizontal: info a la izquierda, QR a la derecha
+            // - Layout flex con gap amplio para separar claramente las tarjetas
             // - box-sizing: border-box para que padding no cause overflow
-            // - Borde solido grueso + fondo gris muy claro para distinguir cada carnet
+            // - Borde solido + fondo gris muy claro para distinguir cada tarjeta
             // - Marcas de corte con tijeras en las esquinas para facilitar recorte
-            // - QR renderizado a <canvas> pixel-perfect (cuadrado perfecto, sin dobles)
-            // - Salto de pagina controlado cada 6 cards (3 columnas x 2 filas)
+            // - QR renderizado a <canvas> pixel-perfect (cuadrado perfecto)
+            // - Salto de pagina controlado cada 8 tarjetas (2 columnas x 4 filas)
             const style = document.createElement('style');
             style.innerHTML = `
-                @page { size: A4; margin: 1cm; }
+                @page { size: A4; margin: 8mm; }
                 * { box-sizing: border-box; }
                 .qr-print-page {
                     display: flex;
                     flex-wrap: wrap;
                     width: 100%;
-                    gap: 14px;
+                    gap: 6mm;
                     align-items: stretch;
                     align-content: flex-start;
-                    justify-content: space-between;
+                    justify-content: flex-start;
                 }
                 .qr-card {
-                    width: calc(33.333% - 10px);
-                    min-height: 230px;
-                    max-height: 250px;
-                    border: 2px solid #1f2937;
-                    border-radius: 8px;
-                    padding: 10px;
-                    text-align: center;
+                    width: 85.6mm;
+                    height: 54mm;
+                    border: 1px solid #1f2937;
+                    border-radius: 3mm;
+                    padding: 3mm;
                     display: flex;
-                    flex-direction: column;
-                    justify-content: center;
+                    flex-direction: row;
                     align-items: center;
                     overflow: hidden;
                     background: #fafafa;
@@ -1494,69 +1495,89 @@
                     page-break-after: auto;
                     position: relative;
                 }
-                /* Cada 6 cards (2 filas de 3), forzar salto de pagina */
-                .qr-card:nth-child(6n) {
+                /* Cada 8 tarjetas (4 filas de 2), forzar salto de pagina */
+                .qr-card:nth-child(8n) {
                     page-break-after: always;
                     break-after: page;
                 }
-                /* La ultima card no debe forzar salto (evita pagina en blanco final) */
+                /* La ultima tarjeta no debe forzar salto (evita pagina en blanco final) */
                 .qr-card:last-child {
                     page-break-after: auto;
                     break-after: auto;
                 }
+                /* Lado izquierdo: informacion del alumno */
+                .qr-card-info {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    padding-right: 2mm;
+                    min-width: 0;
+                }
+                .qr-card-brand {
+                    font-size: 8px;
+                    font-weight: 800;
+                    color: #ea580c;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 1mm;
+                }
                 .qr-card-title {
-                    font-size: 12px;
+                    font-size: 11px;
                     font-weight: bold;
-                    margin-bottom: 2px;
                     color: #1f2937;
-                    line-height: 1.15;
-                    max-width: 100%;
+                    line-height: 1.1;
+                    margin-bottom: 1mm;
                     word-break: break-word;
+                    max-width: 100%;
                 }
                 .qr-card-course {
-                    font-size: 10px;
+                    font-size: 9px;
                     color: #555;
-                    margin-bottom: 6px;
                     font-weight: 600;
                     text-transform: uppercase;
                     letter-spacing: 0.3px;
                 }
+                /* Lado derecho: QR */
                 .qr-container {
                     background: white;
-                    padding: 6px;
+                    padding: 1.5mm;
                     border: 1px solid #1f2937;
-                    border-radius: 4px;
+                    border-radius: 2mm;
                     line-height: 0;
                     display: inline-block;
+                    flex-shrink: 0;
                 }
                 .qr-container canvas {
                     display: block !important;
                     margin: 0 auto;
                     image-rendering: pixelated;
                     image-rendering: crisp-edges;
-                    max-width: 100%;
-                    height: auto;
                 }
                 /* Marca de corte con tijeras en las esquinas para facilitar el recorte */
                 .qr-cut-mark {
                     position: absolute;
-                    font-size: 8px;
+                    font-size: 7px;
                     color: #999;
                     font-family: sans-serif;
                     pointer-events: none;
                 }
-                .qr-cut-mark-tl { top: 2px; left: 4px; }
-                .qr-cut-mark-br { bottom: 2px; right: 4px; }
+                .qr-cut-mark-tl { top: 1mm; left: 1.5mm; }
+                .qr-cut-mark-br { bottom: 1mm; right: 1.5mm; }
             `;
             printArea.appendChild(style);
 
             const pageWrapper = document.createElement('div');
             pageWrapper.className = 'qr-print-page';
 
-            // Generar cada card y su QR
-            // El QR se renderiza a canvas pixel-perfect (cuadrado perfecto)
-            // Tamano 130px con quiet zone de 4 modulos (recomendado por estandar QR)
+            // Generar cada tarjeta y su QR
+            // Layout horizontal: info (izq) + QR (der)
+            // QR de 40mm (~151px a 96dpi) con quiet zone de 4 modulos
+            // 40mm deja espacio suficiente en la tarjeta de 85.6mm para la info
             const qrPromises = [];
+            // Tamano QR en pixels: 40mm a 96dpi = 40 * 96 / 25.4 ≈ 151px
+            // Usamos 150 para tener margen
+            const QR_SIZE_PX = 150;
             studentsToPrint.forEach(s => {
                 const card = document.createElement('div');
                 card.className = 'qr-card';
@@ -1569,18 +1590,28 @@
                 cutBR.className = 'qr-cut-mark qr-cut-mark-br';
                 cutBR.textContent = '✂';
 
+                // Lado izquierdo: informacion del alumno
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'qr-card-info';
+                const brandEl = document.createElement('div');
+                brandEl.className = 'qr-card-brand';
+                brandEl.textContent = 'PISAPORTE V2';
                 const titleEl = document.createElement('div');
                 titleEl.className = 'qr-card-title';
                 titleEl.textContent = s.name;
                 const courseEl = document.createElement('div');
                 courseEl.className = 'qr-card-course';
-                courseEl.textContent = 'PISAPORTE - ' + s.course;
+                courseEl.textContent = s.course;
+                infoDiv.appendChild(brandEl);
+                infoDiv.appendChild(titleEl);
+                infoDiv.appendChild(courseEl);
+
+                // Lado derecho: QR
                 const qrContainer = document.createElement('div');
                 qrContainer.className = 'qr-container';
 
                 card.appendChild(cutTL);
-                card.appendChild(titleEl);
-                card.appendChild(courseEl);
+                card.appendChild(infoDiv);
                 card.appendChild(qrContainer);
                 card.appendChild(cutBR);
                 pageWrapper.appendChild(card);
@@ -1588,8 +1619,7 @@
                 // Generar QR a canvas pixel-perfect (cuadrado perfecto)
                 const promise = new Promise((resolve) => {
                     try {
-                        renderQRToCanvas(qrContainer, s.id, 130, { quietZone: 4 });
-                        // Render es sincrono, damos un microtask para asegurar layout
+                        renderQRToCanvas(qrContainer, s.id, QR_SIZE_PX, { quietZone: 4 });
                         setTimeout(resolve, 5);
                     } catch (e) {
                         console.error("Error generando QR para", s.name, e);
