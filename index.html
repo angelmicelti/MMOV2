@@ -3,13 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pisaporte - Control de Servicios</title>
-    
-    <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#3b82f6">
+    <title>Pisaporte V2 - Control de Servicios</title>
+
+    <!-- ============ PWA META TAGS - Pisaporte V2 ============ -->
+    <!-- Manifest PWA -->
+    <link rel="manifest" href="manifest.webmanifest">
+
+    <!-- Theme color (barra del navegador en movil) - naranja instituto -->
+    <meta name="theme-color" content="#ea580c">
+
+    <!-- Favicon estandar (multi-resolucion) -->
+    <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+    <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48x48.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
+
+    <!-- Apple touch icons (iOS / iPadOS) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180x180.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon-167x167.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon-152x152.png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon-180x180.png">
+
+    <!-- Apple PWA metas -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d7/Toilet_icon.svg/1024px-Toilet_icon.svg.png">
+    <meta name="apple-mobile-web-app-title" content="Pisaporte V2">
+
+    <!-- Microsoft tiles (Windows) -->
+    <meta name="msapplication-TileColor" content="#ea580c">
+    <meta name="msapplication-TileImage" content="icons/icon-144x144.png">
+    <meta name="msapplication-square70x70logo" content="icons/icon-70x70.png">
+    <meta name="msapplication-square150x150logo" content="icons/icon-150x150.png">
+    <meta name="msapplication-square310x310logo" content="icons/icon-310x310.png">
+    <meta name="msapplication-config" content="browserconfig.xml">
+
+    <!-- Metadatos SEO / social -->
+    <meta name="description" content="PWA para el control de acceso al servicio del alumnado en el instituto de secundaria (Pisaporte V2).">
+
+    <!-- Open Graph (previsualizacion al compartir en redes) -->
+    <meta property="og:title" content="Pisaporte V2 - Control de Servicios">
+    <meta property="og:description" content="Sistema de control de acceso al servicio del alumnado del instituto de secundaria (Pisaporte V2).">
+    <meta property="og:image" content="icons/icon-512x512.png">
+    <meta property="og:type" content="website">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Pisaporte V2 - Control de Servicios">
+    <meta name="twitter:image" content="icons/icon-512x512.png">
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -54,7 +94,7 @@
             margin-top: 10px;
         }
         
-        /* Animaciones dinámicas de alerta (Pisaporte) */
+        /* Animaciones dinámicas de alerta (Pisaporte V2) */
         @keyframes pulse-level-1 {
             0%, 100% { background-color: #fef08a; color: #854d0e; transform: scale(1); }
             50% { background-color: #ffffff; color: #854d0e; transform: scale(1.02); }
@@ -91,14 +131,14 @@
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center">
         <i class="fa-solid fa-toilet text-6xl text-blue-500 mb-4 animate-bounce"></i>
-        <h1 class="text-2xl font-bold text-gray-800">Pisaporte</h1>
+        <h1 class="text-2xl font-bold text-gray-800">Pisaporte V2</h1>
         <p class="text-gray-500 mt-2">Conectando a base de datos...</p>
     </div>
 
     <!-- App Header -->
     <header id="main-header" class="bg-blue-600 text-white shadow-md p-4 justify-between items-center z-10 sticky top-0 no-print" style="display: none;">
         <h1 class="text-xl font-bold flex items-center gap-2">
-            <i class="fa-solid fa-id-badge"></i> Pisaporte
+            <i class="fa-solid fa-id-badge"></i> Pisaporte V2
         </h1>
         <div class="flex items-center gap-3">
             <span id="current-user-name" class="text-xs font-semibold bg-blue-700 px-2 py-1 rounded-md">Usuario</span>
@@ -441,7 +481,7 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pisaporte-app-v1';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pisaporte-v2-app';
 
         // ================= ESTADO GLOBAL =================
         let currentUser = null;         // Autenticación anónima Firebase
@@ -1164,7 +1204,7 @@
             printArea.appendChild(gridWrapper);
 
             const originalTitle = document.title;
-            document.title = `Pisaporte_QRs_${formatGroupNameForFile(filter)}`;
+            document.title = `PisaporteV2_QRs_${formatGroupNameForFile(filter)}`;
             setTimeout(() => {
                 window.print();
                 setTimeout(() => { document.title = originalTitle; }, 1000);
@@ -1300,7 +1340,7 @@
 
             const content = document.createElement('div');
             content.innerHTML = `
-                <div class="report-header"><div class="report-title">Informe Pisaporte</div><div class="report-subtitle">Grupo: ${groupFilter === 'ALL' ? 'Todos los grupos' : groupFilter} | Periodo: ${timeFilterText}</div></div>
+                <div class="report-header"><div class="report-title">Informe Pisaporte V2</div><div class="report-subtitle">Grupo: ${groupFilter === 'ALL' ? 'Todos los grupos' : groupFilter} | Periodo: ${timeFilterText}</div></div>
                 <div class="stats-container">
                     <div class="stat-box stat-auth"><div class="stat-label">Autorizadas</div><div class="stat-value">${document.getElementById('stat-auth').textContent}</div></div>
                     <div class="stat-box stat-denied"><div class="stat-label">Denegadas</div><div class="stat-value">${document.getElementById('stat-denied').textContent}</div></div>
@@ -1309,7 +1349,7 @@
             printArea.appendChild(content);
 
             const originalTitle = document.title;
-            document.title = `Informe_Pisaporte_${formatGroupNameForFile(groupFilter)}_${timeFilterText.replace(/\s+/g, '')}`;
+            document.title = `Informe_PisaporteV2_${formatGroupNameForFile(groupFilter)}_${timeFilterText.replace(/\s+/g, '')}`;
             setTimeout(() => { window.print(); setTimeout(() => { document.title = originalTitle; printArea.innerHTML = ''; }, 1000); }, 500);
         };
 
