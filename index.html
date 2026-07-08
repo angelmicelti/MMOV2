@@ -358,7 +358,7 @@
         <!-- ================= VISTA: INFORMES ================= -->
         <section id="view-reports" class="view-section hidden">
             <div class="max-w-xl mx-auto mt-2 space-y-4">
-                <!-- Filtros comunes (periodo + unidad) con flujo numerado -->
+                <!-- Filtros comunes (periodo + unidad para pestaña Usuarios) con flujo numerado -->
                 <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
                     <div class="flex justify-between items-center mb-3">
                         <h2 class="font-bold text-gray-700"><i class="fa-solid fa-chart-pie text-blue-500"></i> Filtros de Informe</h2>
@@ -367,23 +367,28 @@
                             <button id="btn-delete-logs" onclick="confirmDeleteLogs()" class="text-xs bg-red-50 text-red-600 px-3 py-1 rounded-md font-semibold hover:bg-red-100 transition-colors"><i class="fa-solid fa-trash-can"></i> Borrar</button>
                         </div>
                     </div>
-                    <!-- Paso 1: Periodo + Unidad -->
+                    <!-- Paso 1: Periodo (comun a ambas pestañas) -->
                     <div class="space-y-2">
                         <label class="block text-[10px] font-bold text-blue-600 uppercase">
                             <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">1</span>
-                            Periodo y Unidad
+                            Periodo
                         </label>
-                        <div class="grid grid-cols-2 gap-3">
-                            <select id="report-time" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
-                                <option value="today">Hoy</option>
-                                <option value="week">Esta semana</option>
-                                <option value="month">Este mes</option>
-                                <option value="all">Todo el curso</option>
-                            </select>
-                            <select id="report-group" class="border border-gray-300 rounded-lg p-2 text-sm" onchange="onReportGroupChange()">
-                                <option value="ALL">Todas las unidades</option>
-                            </select>
-                        </div>
+                        <select id="report-time" class="w-full border border-gray-300 rounded-lg p-2 text-sm" onchange="generateReport()">
+                            <option value="today">Hoy</option>
+                            <option value="week">Esta semana</option>
+                            <option value="month">Este mes</option>
+                            <option value="all">Todo el curso</option>
+                        </select>
+                    </div>
+                    <!-- Unidad (solo visible en pestaña Usuarios, donde no hay botonera) -->
+                    <div id="report-group-wrapper" class="space-y-2 mt-3 hidden">
+                        <label class="block text-[10px] font-bold text-blue-600 uppercase">
+                            <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">2</span>
+                            Unidad
+                        </label>
+                        <select id="report-group" class="w-full border border-gray-300 rounded-lg p-2 text-sm" onchange="onReportGroupChange()">
+                            <option value="ALL">Todas las unidades</option>
+                        </select>
                     </div>
                 </div>
 
@@ -400,11 +405,29 @@
 
                     <!-- Contenido pestaña Alumnado -->
                     <div id="report-tab-students" class="p-4 space-y-3">
-                        <!-- Paso 2: Buscar alumno concreto o seleccionar toda la unidad -->
+                        <!-- Paso 2: Botonera de unidades (seleccion multiple) -->
+                        <div class="space-y-2">
+                            <div class="flex justify-between items-center">
+                                <label class="block text-[10px] font-bold text-blue-600 uppercase">
+                                    <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">2</span>
+                                    Unidades
+                                </label>
+                                <div class="flex gap-1">
+                                    <button type="button" onclick="selectAllUnits(true)" class="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-semibold hover:bg-blue-100">Todas</button>
+                                    <button type="button" onclick="selectAllUnits(false)" class="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-semibold hover:bg-gray-200">Ninguna</button>
+                                </div>
+                            </div>
+                            <div id="report-units-buttons" class="flex flex-wrap gap-2">
+                                <!-- Botones de unidades generados dinamicamente -->
+                                <span class="text-xs text-gray-400 italic">No hay unidades disponibles</span>
+                            </div>
+                        </div>
+
+                        <!-- Paso 3: Buscar alumno concreto o ver todos los de las unidades seleccionadas -->
                         <div class="space-y-2">
                             <label class="block text-[10px] font-bold text-blue-600 uppercase">
-                                <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">2</span>
-                                Alumno <span class="text-gray-400 font-normal normal-case">(opcional: deja vacío para toda la unidad)</span>
+                                <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">3</span>
+                                Alumno <span class="text-gray-400 font-normal normal-case">(opcional: deja vacío para ver todos los de las unidades seleccionadas)</span>
                             </label>
                             <!-- Buscador por nombre -->
                             <div class="relative">
@@ -454,10 +477,10 @@
 
                     <!-- Contenido pestaña Usuarios -->
                     <div id="report-tab-users" class="p-4 space-y-3 hidden">
-                        <!-- Paso 2: Buscar usuario concreto o ver todos -->
+                        <!-- Paso 3: Buscar usuario concreto o ver todos (paso 2 es el dropdown de Unidad de arriba) -->
                         <div class="space-y-2">
                             <label class="block text-[10px] font-bold text-blue-600 uppercase">
-                                <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">2</span>
+                                <span class="inline-block w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] leading-4 text-center mr-1">3</span>
                                 Usuario (profesor) <span class="text-gray-400 font-normal normal-case">(opcional: deja vacío para todos)</span>
                             </label>
                             <!-- Buscador por nombre -->
@@ -1768,6 +1791,10 @@
             updateStudentSelector(reportSelect.value);
             // Rellenar selector de usuarios del informe
             updateUserSelector();
+            // Rellenar botonera de unidades (pestaña Alumnado)
+            renderUnitsButtons();
+            // Sincronizar selector de alumnos con botonera
+            updateStudentSelectorForSelectedUnits();
         }
 
         // Cache de listas completas para el filtro de busqueda
@@ -1898,6 +1925,158 @@
             generateReport();
         };
 
+        // ================= BOTONERA DE UNIDADES (seleccion multiple) =================
+        // Estado de unidades seleccionadas (Set de nombres de unidad)
+        let _selectedUnits = new Set(); // vacio = todas seleccionadas
+
+        // Rellena la botonera de unidades con los grupos disponibles
+        function renderUnitsButtons() {
+            const container = document.getElementById('report-units-buttons');
+            if (!container) return;
+            if (currentAppUser?.role === 'tutor') {
+                // Tutores: solo ven su grupo, no pueden elegir otros
+                container.innerHTML = `<span class="text-xs text-gray-500 italic">Tu grupo: ${currentAppUser.tutorGroup}</span>`;
+                _selectedUnits = new Set([currentAppUser.tutorGroup]);
+                return;
+            }
+            const groups = [...new Set(allStudents.map(s => s.course))].sort();
+            if (groups.length === 0) {
+                container.innerHTML = '<span class="text-xs text-gray-400 italic">No hay unidades disponibles</span>';
+                return;
+            }
+            container.innerHTML = '';
+            groups.forEach(g => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.dataset.unit = g;
+                btn.textContent = g;
+                btn.className = 'unit-btn px-3 py-1.5 rounded-full text-xs font-bold border transition-colors';
+                // Estado inicial: si _selectedUnits esta vacio, todas seleccionadas
+                const isSelected = _selectedUnits.size === 0 || _selectedUnits.has(g);
+                btn.classList.add(isSelected
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50');
+                btn.onclick = () => toggleUnitButton(g);
+                container.appendChild(btn);
+            });
+        }
+        window.renderUnitsButtons = renderUnitsButtons;
+
+        // Toggle de seleccion de una unidad
+        window.toggleUnitButton = (unitName) => {
+            if (_selectedUnits.size === 0) {
+                // Todas estaban seleccionadas: al clicar una, seleccionamos SOLO esa
+                _selectedUnits = new Set();
+                // Recoger todas las unidades actuales y marcar solo la clicada
+                const allButtons = document.querySelectorAll('#report-units-buttons .unit-btn');
+                allButtons.forEach(b => {
+                    if (b.dataset.unit !== unitName) {
+                        // pasar a no seleccionado visualmente
+                    }
+                });
+                _selectedUnits.add(unitName);
+            } else if (_selectedUnits.has(unitName)) {
+                // Ya estaba seleccionada: la quitamos
+                _selectedUnits.delete(unitName);
+                // Si queda vacio, volver a "todas seleccionadas"
+                if (_selectedUnits.size === 0) {
+                    _selectedUnits = new Set(); // vacio = todas
+                }
+            } else {
+                // No estaba: la anyadimos
+                _selectedUnits.add(unitName);
+            }
+            // Actualizar visual de los botones
+            updateUnitsButtonsVisual();
+            // Actualizar selector de alumnos y recalcular informe
+            updateStudentSelectorForSelectedUnits();
+            generateReport();
+        };
+
+        // Seleccionar todas o ninguna unidad
+        window.selectAllUnits = (selectAll) => {
+            if (selectAll) {
+                _selectedUnits = new Set(); // vacio = todas seleccionadas
+            } else {
+                // Ninguna: marcamos como seleccionado un set con un elemento imposible
+                // para que ningun alumno se muestre (efecto "ninguna")
+                _selectedUnits = new Set(['__NONE__']);
+            }
+            updateUnitsButtonsVisual();
+            updateStudentSelectorForSelectedUnits();
+            generateReport();
+        };
+
+        // Actualiza el estilo visual de los botones segun el estado
+        function updateUnitsButtonsVisual() {
+            const buttons = document.querySelectorAll('#report-units-buttons .unit-btn');
+            buttons.forEach(btn => {
+                const g = btn.dataset.unit;
+                const isSelected = _selectedUnits.size === 0 || _selectedUnits.has(g);
+                btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600',
+                    'bg-white', 'text-gray-500', 'border-gray-300', 'hover:bg-gray-50');
+                if (isSelected) {
+                    btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+                } else {
+                    btn.classList.add('bg-white', 'text-gray-500', 'border-gray-300', 'hover:bg-gray-50');
+                }
+            });
+        }
+
+        // Devuelve la lista de unidades seleccionadas para filtrar logs
+        // Si _selectedUnits esta vacio -> null (todas las unidades)
+        // Si contiene '__NONE__' -> [] (ninguna)
+        function getSelectedUnitsForFilter() {
+            if (_selectedUnits.size === 0) return null; // todas
+            if (_selectedUnits.has('__NONE__')) return []; // ninguna
+            return [..._selectedUnits];
+        }
+        window.getSelectedUnitsForFilter = getSelectedUnitsForFilter;
+
+        // Rellena el selector de alumnos segun las unidades seleccionadas
+        function updateStudentSelectorForSelectedUnits() {
+            const sel = document.getElementById('report-student');
+            const searchInput = document.getElementById('report-student-search');
+            if (!sel) return;
+            const currentVal = sel.value;
+
+            const units = getSelectedUnitsForFilter();
+            let students = allStudents;
+            if (units !== null) {
+                // units es array (posiblemente vacio)
+                students = students.filter(s => units.includes(s.course));
+            }
+            students = [...students].sort((a, b) => a.name.localeCompare(b.name));
+            _allStudentsForReport = students;
+
+            // Texto de la opcion "todos" segun seleccion
+            let allLabel;
+            if (units === null) {
+                allLabel = 'Todos los alumnos (todas las unidades)';
+            } else if (units.length === 0) {
+                allLabel = 'Ninguna unidad seleccionada';
+            } else if (units.length === 1) {
+                allLabel = `Toda la unidad (${units[0]})`;
+            } else {
+                allLabel = `Todos los alumnos (${units.length} unidades)`;
+            }
+
+            let html = `<option value="ALL">${allLabel}</option>`;
+            students.forEach(s => {
+                html += `<option value="${s.id}">${s.name} (${s.course})</option>`;
+            });
+            sel.innerHTML = html;
+            // Restaurar seleccion previa si sigue siendo valida
+            if ([...sel.options].some(o => o.value === currentVal)) {
+                sel.value = currentVal;
+            } else {
+                sel.value = 'ALL';
+            }
+            // Limpiar buscador
+            if (searchInput) searchInput.value = '';
+        }
+        window.updateStudentSelectorForSelectedUnits = updateStudentSelectorForSelectedUnits;
+
         // Cambia de pestana en el informe
         let currentReportTab = 'students';
         window.switchReportTab = (tabId) => {
@@ -1906,6 +2085,7 @@
             const tabUsers = document.getElementById('report-tab-users');
             const btnStudents = document.getElementById('tab-btn-students');
             const btnUsers = document.getElementById('tab-btn-users');
+            const groupWrapper = document.getElementById('report-group-wrapper');
 
             if (tabId === 'students') {
                 tabStudents.classList.remove('hidden');
@@ -1914,6 +2094,8 @@
                 btnStudents.classList.remove('text-gray-500', 'bg-white', 'border-transparent');
                 btnUsers.classList.remove('text-blue-600', 'bg-blue-50', 'border-blue-600');
                 btnUsers.classList.add('text-gray-500', 'bg-white', 'border-transparent');
+                // En Alumnado: ocultar dropdown de Unidad (se usa la botonera)
+                if (groupWrapper) groupWrapper.classList.add('hidden');
             } else {
                 tabUsers.classList.remove('hidden');
                 tabStudents.classList.add('hidden');
@@ -1921,6 +2103,8 @@
                 btnUsers.classList.remove('text-gray-500', 'bg-white', 'border-transparent');
                 btnStudents.classList.remove('text-blue-600', 'bg-blue-50', 'border-blue-600');
                 btnStudents.classList.add('text-gray-500', 'bg-white', 'border-transparent');
+                // En Usuarios: mostrar dropdown de Unidad (no hay botonera)
+                if (groupWrapper) groupWrapper.classList.remove('hidden');
             }
             generateReport();
         };
@@ -2282,8 +2466,24 @@
             else if (timeFilter === 'week') { const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); filteredLogs = filteredLogs.filter(l => l.timestamp >= weekAgo); }
             else if (timeFilter === 'month') { const monthStr = todayStr.substring(0, 7); filteredLogs = filteredLogs.filter(l => l.dateString.startsWith(monthStr)); }
 
-            // Filtro por grupo
-            if (groupFilter !== 'ALL') filteredLogs = filteredLogs.filter(l => l.course === groupFilter);
+            // Filtro por unidad:
+            // - En pestaña Alumnado: usar la botonera (seleccion multiple)
+            // - En pestaña Usuarios: usar el dropdown de Unidad (seleccion unica)
+            if (currentReportTab === 'students') {
+                const units = getSelectedUnitsForFilter();
+                if (units !== null) {
+                    // units es array (puede ser vacio si "Ninguna")
+                    if (units.length === 0) {
+                        filteredLogs = []; // Ninguna unidad: ningun log
+                    } else {
+                        filteredLogs = filteredLogs.filter(l => units.includes(l.course));
+                    }
+                }
+                // Si units === null, no filtrar (todas las unidades)
+            } else {
+                // Pestaña Usuarios: usar dropdown de Unidad
+                if (groupFilter !== 'ALL') filteredLogs = filteredLogs.filter(l => l.course === groupFilter);
+            }
 
             window.currentFilteredLogs = filteredLogs;
 
@@ -2494,7 +2694,20 @@
             // Construir subtitulo segun filtros aplicados
             let subtitleParts = [];
             subtitleParts.push(`Periodo: ${timeFilterText}`);
-            subtitleParts.push(`Grupo: ${groupFilter === 'ALL' ? 'Todos' : groupFilter}`);
+            // En Alumnado: usar unidades seleccionadas de la botonera
+            // En Usuarios: usar dropdown de Unidad
+            if (currentReportTab === 'students') {
+                const units = getSelectedUnitsForFilter();
+                if (units === null) {
+                    subtitleParts.push('Unidades: Todas');
+                } else if (units.length === 0) {
+                    subtitleParts.push('Unidades: Ninguna');
+                } else {
+                    subtitleParts.push(`Unidades: ${units.join(', ')}`);
+                }
+            } else {
+                subtitleParts.push(`Unidad: ${groupFilter === 'ALL' ? 'Todas' : groupFilter}`);
+            }
             if (currentReportTab === 'students' && studentFilter !== 'ALL') {
                 const s = allStudents.find(x => x.id === studentFilter);
                 subtitleParts.push(`Alumno: ${s ? s.name : 'desconocido'}`);
