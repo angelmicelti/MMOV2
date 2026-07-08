@@ -1229,14 +1229,6 @@
         };
 
         // ================= ESCÁNER QR =================
-        function initScanner() {
-            html5QrcodeScanner = new Html5Qrcode("reader");
-            if (document.getElementById('view-scanner').classList.contains('hidden') === false) {
-                startScanner();
-            }
-        }
-
-        // ================= ESCÁNER QR =================
         // Estado global para gestion de camaras
         let availableVideoDevices = []; // Lista de {deviceId, label} para el selector
         let lastUsedCameraConstraints = null; // Para recordar que camara se uso
