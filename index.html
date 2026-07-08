@@ -60,7 +60,7 @@
     <!-- Librerías Externas -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 
     <style>
         /* Estilos base y utilidades PWA */
@@ -1435,23 +1435,9 @@
             title.textContent = studentName;
             hint.textContent = `ID: ${studentId}`;
             container.innerHTML = '';
-            // QR grande (300x300) con nivel H para que sea facilmente escaneable desde otra pantalla
-            new QRCode(container, {
-                text: studentId,
-                width: 300,
-                height: 300,
-                colorDark: "#000000",
-                colorLight: "#ffffff",
-                correctLevel: QRCode.CorrectLevel.H
-            });
-            // Forzar fondo blanco y display block en el canvas/img generado
-            setTimeout(() => {
-                const imgs = container.querySelectorAll('img, canvas');
-                imgs.forEach(el => {
-                    el.style.display = 'block';
-                    el.style.background = '#ffffff';
-                });
-            }, 50);
+            // QR grande (300x300) renderizado a canvas pixel-perfect (cuadrado perfecto)
+            // quietZone 4 modulos (recomendado por estandar QR) para que sea escaneable
+            renderQRToCanvas(container, studentId, 300, { quietZone: 4 });
             modal.style.display = 'flex';
         };
         window.closeQRPreview = () => {
@@ -1469,33 +1455,33 @@
             const printArea = document.getElementById('print-area');
             printArea.innerHTML = '';
 
-            // CSS de impresion robusto:
-            // - Layout flex con gap amplio (20px) para separar claramente las cards
+            // CSS de impresion: 6 carnets por pagina A4 (3 columnas x 2 filas)
+            // - Layout flex con gap amplio para separar claramente las cards
             // - box-sizing: border-box para que padding no cause overflow
             // - Borde solido grueso + fondo gris muy claro para distinguir cada carnet
-            // - Linea de corte con tijeras entre cards para facilitar recorte manual
-            // - CSS especifico para la <table> que genera qrcodejs internamente
-            // - Salto de pagina controlado cada 4 cards (2 filas x 2 columnas)
+            // - Marcas de corte con tijeras en las esquinas para facilitar recorte
+            // - QR renderizado a <canvas> pixel-perfect (cuadrado perfecto, sin dobles)
+            // - Salto de pagina controlado cada 6 cards (3 columnas x 2 filas)
             const style = document.createElement('style');
             style.innerHTML = `
-                @page { size: A4; margin: 1.2cm; }
+                @page { size: A4; margin: 1cm; }
                 * { box-sizing: border-box; }
                 .qr-print-page {
                     display: flex;
                     flex-wrap: wrap;
                     width: 100%;
-                    gap: 24px;
+                    gap: 14px;
                     align-items: stretch;
                     align-content: flex-start;
                     justify-content: space-between;
                 }
                 .qr-card {
-                    width: calc(50% - 12px);
-                    min-height: 300px;
-                    max-height: 320px;
+                    width: calc(33.333% - 10px);
+                    min-height: 230px;
+                    max-height: 250px;
                     border: 2px solid #1f2937;
-                    border-radius: 10px;
-                    padding: 16px;
+                    border-radius: 8px;
+                    padding: 10px;
                     text-align: center;
                     display: flex;
                     flex-direction: column;
@@ -1508,8 +1494,8 @@
                     page-break-after: auto;
                     position: relative;
                 }
-                /* Cada 4 cards (2 filas), forzar salto de pagina tras la 4ta, 8va, etc */
-                .qr-card:nth-child(4n) {
+                /* Cada 6 cards (2 filas de 3), forzar salto de pagina */
+                .qr-card:nth-child(6n) {
                     page-break-after: always;
                     break-after: page;
                 }
@@ -1519,50 +1505,30 @@
                     break-after: auto;
                 }
                 .qr-card-title {
-                    font-size: 15px;
+                    font-size: 12px;
                     font-weight: bold;
-                    margin-bottom: 4px;
+                    margin-bottom: 2px;
                     color: #1f2937;
-                    line-height: 1.2;
+                    line-height: 1.15;
                     max-width: 100%;
                     word-break: break-word;
                 }
                 .qr-card-course {
-                    font-size: 12px;
+                    font-size: 10px;
                     color: #555;
-                    margin-bottom: 12px;
+                    margin-bottom: 6px;
                     font-weight: 600;
                     text-transform: uppercase;
-                    letter-spacing: 0.5px;
+                    letter-spacing: 0.3px;
                 }
                 .qr-container {
                     background: white;
-                    padding: 12px;
-                    border: 2px solid #1f2937;
-                    border-radius: 8px;
+                    padding: 6px;
+                    border: 1px solid #1f2937;
+                    border-radius: 4px;
                     line-height: 0;
                     display: inline-block;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
                 }
-                /* qrcodejs genera una <table> internamente; hay que resetear su CSS */
-                .qr-container table {
-                    border-collapse: collapse;
-                    margin: 0 auto;
-                    background: white;
-                }
-                .qr-container table td {
-                    border: none;
-                    padding: 0;
-                    margin: 0;
-                    width: 5px;
-                    height: 5px;
-                    line-height: 0;
-                    font-size: 0;
-                }
-                .qr-container table td.black { background: #000; }
-                .qr-container table td.white { background: #fff; }
-                /* Por si la libreria usa img/canvas en algunos navegadores */
-                .qr-container img,
                 .qr-container canvas {
                     display: block !important;
                     margin: 0 auto;
@@ -1574,13 +1540,13 @@
                 /* Marca de corte con tijeras en las esquinas para facilitar el recorte */
                 .qr-cut-mark {
                     position: absolute;
-                    font-size: 9px;
+                    font-size: 8px;
                     color: #999;
                     font-family: sans-serif;
                     pointer-events: none;
                 }
-                .qr-cut-mark-tl { top: 4px; left: 6px; }
-                .qr-cut-mark-br { bottom: 4px; right: 6px; }
+                .qr-cut-mark-tl { top: 2px; left: 4px; }
+                .qr-cut-mark-br { bottom: 2px; right: 4px; }
             `;
             printArea.appendChild(style);
 
@@ -1588,6 +1554,8 @@
             pageWrapper.className = 'qr-print-page';
 
             // Generar cada card y su QR
+            // El QR se renderiza a canvas pixel-perfect (cuadrado perfecto)
+            // Tamano 130px con quiet zone de 4 modulos (recomendado por estandar QR)
             const qrPromises = [];
             studentsToPrint.forEach(s => {
                 const card = document.createElement('div');
@@ -1596,10 +1564,10 @@
                 // Marcas de corte con tijeras en las esquinas opuestas
                 const cutTL = document.createElement('div');
                 cutTL.className = 'qr-cut-mark qr-cut-mark-tl';
-                cutTL.textContent = '✂ - - -';
+                cutTL.textContent = '✂';
                 const cutBR = document.createElement('div');
                 cutBR.className = 'qr-cut-mark qr-cut-mark-br';
-                cutBR.textContent = '- - - ✂';
+                cutBR.textContent = '✂';
 
                 const titleEl = document.createElement('div');
                 titleEl.className = 'qr-card-title';
@@ -1617,23 +1585,15 @@
                 card.appendChild(cutBR);
                 pageWrapper.appendChild(card);
 
-                // Generar QR y devolver una promesa que se resuelve cuando el QR esta en el DOM
+                // Generar QR a canvas pixel-perfect (cuadrado perfecto)
                 const promise = new Promise((resolve) => {
                     try {
-                        new QRCode(qrContainer, {
-                            text: s.id,
-                            width: 170,
-                            height: 170,
-                            colorDark: "#000000",
-                            colorLight: "#ffffff",
-                            correctLevel: QRCode.CorrectLevel.H
-                        });
-                        // qrcodejs renderiza sincronamente la <table>, pero damos un microtask
-                        // para asegurar que el DOM este actualizado
-                        setTimeout(resolve, 10);
+                        renderQRToCanvas(qrContainer, s.id, 130, { quietZone: 4 });
+                        // Render es sincrono, damos un microtask para asegurar layout
+                        setTimeout(resolve, 5);
                     } catch (e) {
                         console.error("Error generando QR para", s.name, e);
-                        qrContainer.innerHTML = '<div style="color:red;font-size:10px;">Error QR</div>';
+                        qrContainer.innerHTML = '<div style="color:red;font-size:9px;">Error QR</div>';
                         resolve();
                     }
                 });
@@ -1803,6 +1763,74 @@
         };
 
         // ================= UTILIDADES =================
+
+        // Renderiza un QR a <canvas> con tamaño pixel-perfect (cuadrado perfecto).
+        // Usa la libreria global qrcode-generator (cargada via CDN) que es mas fiable
+        // que qrcodejs: genera una unica matriz de modulos sin duplicados.
+        //
+        // Parametros:
+        //   container: elemento DOM donde insertar el canvas
+        //   text: contenido del QR (ej: studentId)
+        //   sizePx: tamano total en pixels (el canvas sera sizePx x sizePx)
+        //   options: { quietZone (px,默认 4), scale (factor escala,默认 1) }
+        //
+        // Devuelve el canvas creado (para poder manipularlo si hace falta).
+        function renderQRToCanvas(container, text, sizePx, options) {
+            options = options || {};
+            const quietZone = options.quietZone != null ? options.quietZone : 4; // modulos de margen blanco
+            const scale = options.scale || 1;
+
+            // typeNumber 0 = deteccion automatica del tipo mas pequeño que cabe
+            // errorCorrectionLevel 'H' = alta (30%) - recomendado para impresion
+            const qr = qrcode(0, 'H');
+            qr.addData(text);
+            qr.make();
+
+            const moduleCount = qr.getModuleCount();
+            const totalModules = moduleCount + quietZone * 2;
+
+            // Tamano del canvas en pixels reales (multiplo de totalModules para pixel-perfect)
+            // Usamos un canvas de alta resolucion (sizePx * scale) y luego CSS lo escala a sizePx
+            const canvasSize = sizePx * scale;
+            const pixelSize = Math.floor(canvasSize / totalModules);
+            const actualCanvasSize = pixelSize * totalModules; // garantiza cuadrado perfecto
+
+            const canvas = document.createElement('canvas');
+            canvas.width = actualCanvasSize;
+            canvas.height = actualCanvasSize;
+            canvas.style.width = sizePx + 'px';
+            canvas.style.height = sizePx + 'px';
+            canvas.style.display = 'block';
+            canvas.style.background = '#ffffff';
+            canvas.style.imageRendering = 'pixelated';
+            canvas.style.imageRendering = 'crisp-edges';
+
+            const ctx = canvas.getContext('2d');
+            // Fondo blanco (incluido quiet zone)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, actualCanvasSize, actualCanvasSize);
+
+            // Dibujar modulos negros
+            ctx.fillStyle = '#000000';
+            for (let row = 0; row < moduleCount; row++) {
+                for (let col = 0; col < moduleCount; col++) {
+                    if (qr.isDark(row, col)) {
+                        ctx.fillRect(
+                            (col + quietZone) * pixelSize,
+                            (row + quietZone) * pixelSize,
+                            pixelSize,
+                            pixelSize
+                        );
+                    }
+                }
+            }
+
+            container.innerHTML = '';
+            container.appendChild(canvas);
+            return canvas;
+        }
+        window.renderQRToCanvas = renderQRToCanvas;
+
         function formatGroupNameForFile(name) {
             if (name === "ALL") return "TodosGrupos";
             if (!name) return "";
