@@ -494,7 +494,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, onSnapshot, doc, deleteDoc, enableIndexedDbPersistence, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ================= CONFIGURACIÓN FIREBASE =================
         const userFirebaseConfig = {
@@ -512,7 +512,30 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pisaporte-v2-app';
+
+        // ================= APP ID - NO CAMBIAR =================
+        // El appId determina la ruta de Firestore: artifacts/{appId}/public/data/pisaporte_*
+        // Si se cambia, los datos existentes (alumnos, usuarios, logs) DEJARAN de verse
+        // porque la app buscara en una ruta distinta.
+        //
+        // appIds conocidos donde pueden existir datos:
+        //   - 'pisaporte-app-v1' (ORIGINAL - donde estan los datos historicos)
+        //   - 'pisaporte-v2-app' (usado temporalmente, posiblemente vacio)
+        //   - 'mmo-v2-app'       (usado temporalmente, posiblemente vacio)
+        //
+        // Mantenemos 'pisaporte-app-v1' para preservar los datos existentes.
+        const DEFAULT_APP_ID = 'pisaporte-app-v1';
+        const KNOWN_APP_IDS = ['pisaporte-app-v1', 'pisaporte-v2-app', 'mmo-v2-app'];
+        const appId = typeof __app_id !== 'undefined' ? __app_id : DEFAULT_APP_ID;
+        // activeAppId: puede ser cambiado por el usuario via panel de diagnostico (se guarda en localStorage)
+        let activeAppId = appId;
+        try {
+            const stored = localStorage.getItem('pisaporte_active_app_id');
+            if (stored && KNOWN_APP_IDS.includes(stored)) {
+                activeAppId = stored;
+                console.log("appId activo recuperado de localStorage:", activeAppId);
+            }
+        } catch (e) {}
 
         // ================= ESTADO GLOBAL =================
         let currentUser = null;         // Autenticación anónima Firebase
@@ -528,12 +551,15 @@
 
         // Diagnostico Firebase (visible para el usuario via consola y panel)
         window.__firebaseDebug = {
-            appId,
+            appId: activeAppId,
+            defaultAppId: DEFAULT_APP_ID,
+            knownAppIds: KNOWN_APP_IDS,
             config: { projectId: firebaseConfig.projectId, authDomain: firebaseConfig.authDomain },
             authUid: null,
             collectionsLoaded: { users: false, students: false, logs: false },
             counts: { users: 0, students: 0, logs: 0 },
-            lastErrors: []
+            lastErrors: [],
+            otherPaths: null  // Resultado de escanear otras rutas
         };
 
         // ================= INICIALIZACIÓN Y AUTH FIREBASE =================
@@ -604,8 +630,8 @@
         function setupRealtimeListeners() {
             if (!currentUser) return;
 
-            console.log("Configurando listeners Firestore. appId:", appId);
-            console.log("Ruta base: artifacts/" + appId + "/public/data/pisaporte_*");
+            console.log("Configurando listeners Firestore. appId:", activeAppId);
+            console.log("Ruta base: artifacts/" + activeAppId + "/public/data/pisaporte_*");
 
             // Wrapper con reconexion automatica para onSnapshot
             function watchCollection(name, ref, callback) {
@@ -653,7 +679,7 @@
             }
 
             // Escuchar usuarios
-            const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users');
+            const usersRef = collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_users');
             watchCollection('users', usersRef, (snapshot) => {
                 allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -662,7 +688,17 @@
                     isAppInitialized = true;
                     // Evaluar flujo de inicio
                     if (allUsers.length === 0) {
-                        showSetupAdminScreen();
+                        // Si no hay usuarios en la ruta activa, buscar en otras rutas conocidas
+                        scanOtherAppPaths().then(() => {
+                            if (window.__firebaseDebug.otherPaths) {
+                                const withData = window.__firebaseDebug.otherPaths.filter(p => p.users > 0 || p.students > 0);
+                                if (withData.length > 0) {
+                                    console.warn("ATENCION: Se encontraron datos en otras rutas:", withData);
+                                    showToast("Datos encontrados en otra ruta. Revisa el panel de diagnostico (boton estetoscopio).");
+                                }
+                            }
+                            showSetupAdminScreen();
+                        });
                     } else if (!currentAppUser) {
                         showLoginScreen();
                     }
@@ -686,7 +722,7 @@
                 }
             });
 
-            const studentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students');
+            const studentsRef = collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_students');
             watchCollection('students', studentsRef, (snapshot) => {
                 allStudents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 console.log(`Alumnos cargados: ${allStudents.length}. Cursos disponibles:`,
@@ -697,7 +733,7 @@
                 }
             });
 
-            const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs');
+            const logsRef = collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_logs');
             watchCollection('logs', logsRef, (snapshot) => {
                 allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 if (!document.getElementById('view-reports').classList.contains('hidden')) {
@@ -705,6 +741,50 @@
                 }
             });
         }
+
+        // ================= EXPLORADOR DE RUTAS ALTERNATIVAS =================
+        // Busca datos en otros appIds conocidos para detectar si los datos estan
+        // en una ruta distinta a la activa (util si se cambio el appId en algun momento)
+        async function scanOtherAppPaths() {
+            const results = [];
+            for (const candidateId of KNOWN_APP_IDS) {
+                if (candidateId === activeAppId) {
+                    results.push({ appId: candidateId, active: true, users: window.__firebaseDebug.counts.users, students: window.__firebaseDebug.counts.students });
+                    continue;
+                }
+                try {
+                    const uSnap = await getDocs(collection(db, 'artifacts', candidateId, 'public', 'data', 'pisaporte_users'));
+                    const sSnap = await getDocs(collection(db, 'artifacts', candidateId, 'public', 'data', 'pisaporte_students'));
+                    const result = {
+                        appId: candidateId,
+                        active: false,
+                        users: uSnap.size,
+                        students: sSnap.size
+                    };
+                    results.push(result);
+                    console.log(`Escaneo ruta ${candidateId}: users=${uSnap.size}, students=${sSnap.size}`);
+                } catch (e) {
+                    console.warn(`Error escaneando ${candidateId}:`, e.code, e.message);
+                    results.push({ appId: candidateId, active: false, users: -1, students: -1, error: e.message });
+                }
+            }
+            window.__firebaseDebug.otherPaths = results;
+            return results;
+        }
+        window.scanOtherAppPaths = scanOtherAppPaths;
+
+        // Cambia el appId activo y recarga la pagina para aplicar el cambio
+        window.switchAppId = async (newAppId) => {
+            if (!KNOWN_APP_IDS.includes(newAppId)) {
+                showToast("appId no valido");
+                return;
+            }
+            if (!confirm(`¿Cambiar la ruta activa a '${newAppId}'? La pagina se recargara.`)) return;
+            try {
+                localStorage.setItem('pisaporte_active_app_id', newAppId);
+            } catch (e) {}
+            window.location.reload();
+        };
 
         // ================= SISTEMA DE LOGIN (PWA) =================
         function showSetupAdminScreen() {
@@ -766,7 +846,7 @@
             if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) return showToast("El nombre de usuario ya está en uso");
 
             try {
-                const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users');
+                const usersRef = collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_users');
                 await addDoc(usersRef, { name, username, password, role: 'admin', tutorGroup: '' });
                 showToast("Administrador creado. Iniciando sesión...");
                 
@@ -794,7 +874,7 @@
             if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) return showToast("El usuario ya existe. Elige otro.");
 
             try {
-                const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users');
+                const usersRef = collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_users');
                 await addDoc(usersRef, { name, username, password, role: 'profesor', tutorGroup: '' });
                 showToast("Cuenta creada. Iniciando sesión...");
                 
@@ -1000,14 +1080,14 @@
                     if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase() && u.id !== id)) {
                         return showToast("El usuario ya existe");
                     }
-                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users', id), userData);
+                    await updateDoc(doc(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_users', id), userData);
                     showToast("Usuario actualizado");
                 } else {
                     // Validar duplicado al crear
                     if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) {
                         return showToast("El usuario ya existe");
                     }
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users'), userData);
+                    await addDoc(collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_users'), userData);
                     showToast("Usuario creado");
                 }
                 closeUserModal();
@@ -1020,7 +1100,7 @@
         window.confirmDeleteUser = (id, name) => {
             window.showConfirmModal('Borrar Usuario', `¿Eliminar al usuario ${name}?`, async () => {
                 try {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_users', id));
+                    await deleteDoc(doc(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_users', id));
                     showToast("Usuario eliminado");
                 } catch (e) { showToast("Error al eliminar"); }
             });
@@ -1057,7 +1137,7 @@
             }
 
             try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students'), {
+                await addDoc(collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_students'), {
                     name, course, importedAt: Date.now()
                 });
                 showToast("Alumno añadido correctamente");
@@ -1210,7 +1290,7 @@
             const isAuthorized = document.getElementById('toggle-auth').checked;
 
             try {
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs'), {
+                await addDoc(collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_logs'), {
                     studentId: currentScannedStudent.id,
                     studentName: currentScannedStudent.name,
                     course: currentScannedStudent.course,
@@ -1248,7 +1328,7 @@
                         if (name) {
                             name = name.trim().replace(/^["'](.+(?=["']$))["']$/, '$1'); 
                             if (!allStudents.some(s => s.name === name && s.course === courseInput)) {
-                                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students'), { name, course: courseInput, importedAt: Date.now() });
+                                await addDoc(collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_students'), { name, course: courseInput, importedAt: Date.now() });
                                 count++;
                             }
                         }
@@ -1421,7 +1501,7 @@
 
         window.confirmDeleteStudent = (id, name) => {
             window.showConfirmModal('Eliminar Alumno', `¿Eliminar a ${name}?`, async () => {
-                try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students', id)); showToast("Alumno eliminado."); } 
+                try { await deleteDoc(doc(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_students', id)); showToast("Alumno eliminado."); } 
                 catch (e) { showToast("Error al eliminar."); }
             });
         };
@@ -1433,7 +1513,7 @@
             window.showConfirmModal('Eliminar Grupo', `¿Eliminar los ${count} alumnos de ${group}?`, async () => {
                 try {
                     const studentsToDelete = allStudents.filter(s => s.course === group);
-                    for (const s of studentsToDelete) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_students', s.id));
+                    for (const s of studentsToDelete) await deleteDoc(doc(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_students', s.id));
                     showToast(`Grupo ${group} eliminado.`);
                     document.getElementById('group-filter').value = 'ALL';
                     renderStudentsList();
@@ -1446,7 +1526,7 @@
             const count = window.currentFilteredLogs.length;
             window.showConfirmModal('Borrar Registros', `¿Eliminar ${count} registros mostrados?`, async () => {
                 try {
-                    for (const l of window.currentFilteredLogs) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs', l.id));
+                    for (const l of window.currentFilteredLogs) await deleteDoc(doc(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_logs', l.id));
                     showToast(`Registros eliminados.`);
                 } catch (e) { showToast("Error al eliminar."); }
             });
@@ -1457,7 +1537,7 @@
             if (logsToDelete.length === 0) return;
             window.showConfirmModal('Borrar Registros', `¿Eliminar registros de ${studentName}?`, async () => {
                 try {
-                    for (const l of logsToDelete) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pisaporte_logs', l.id));
+                    for (const l of logsToDelete) await deleteDoc(doc(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_logs', l.id));
                     showToast(`Registros eliminados.`);
                 } catch (e) { showToast("Error al eliminar."); }
             });
@@ -1571,7 +1651,7 @@
 
         // ================= PANEL DE DIAGNOSTICO FIREBASE =================
         // Permite al usuario ver el estado de la sincronizacion sin abrir la consola
-        window.toggleFBDebug = () => {
+        window.toggleFBDebug = async () => {
             const panel = document.getElementById('fb-debug-panel');
             const content = document.getElementById('fb-debug-content');
             const debug = window.__firebaseDebug || {};
@@ -1582,16 +1662,44 @@
                 const counts = debug.counts || {};
                 const loaded = debug.collectionsLoaded || {};
                 const errors = debug.lastErrors || [];
+                const otherPaths = debug.otherPaths || [];
+                const currentAppId = activeAppId; // valor real actual
 
                 let html = '';
                 html += `<div><b>Project ID:</b> ${(debug.config || {}).projectId || '?'}</div>`;
                 html += `<div><b>Auth Domain:</b> ${(debug.config || {}).authDomain || '?'}</div>`;
-                html += `<div><b>App ID:</b> ${debug.appId || '?'}</div>`;
+                html += `<div><b>App ID activo:</b> <span class="text-blue-600 font-bold">${currentAppId}</span></div>`;
                 html += `<div><b>UID anonimo:</b> ${debug.authUid || '(no autenticado)'}</div>`;
-                html += `<div class="border-t pt-2 mt-2"><b>Colecciones:</b></div>`;
+                html += `<div class="border-t pt-2 mt-2"><b>Colecciones (ruta activa):</b></div>`;
                 html += `<div>- users: ${status(loaded.users)} (${counts.users || 0} docs)</div>`;
                 html += `<div>- students: ${status(loaded.students)} (${counts.students || 0} docs)</div>`;
                 html += `<div>- logs: ${status(loaded.logs)} (${counts.logs || 0} docs)</div>`;
+
+                // Seccion de exploracion de rutas alternativas
+                html += `<div class="border-t pt-2 mt-2"><b>Rutas alternativas:</b></div>`;
+                if (otherPaths.length === 0) {
+                    html += `<div class="text-gray-500 italic">No escaneado aun.</div>`;
+                    html += `<button onclick="window.scanAndShowPaths()" class="mt-1 w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-medium">Escanear otras rutas</button>`;
+                } else {
+                    otherPaths.forEach(p => {
+                        const isActive = p.appId === currentAppId;
+                        const hasData = (p.users > 0 || p.students > 0);
+                        const colorClass = hasData ? 'text-green-700' : 'text-gray-500';
+                        const bgClass = isActive ? 'bg-blue-50' : '';
+                        html += `<div class="${bgClass} p-1 rounded text-xs">`;
+                        html += `<div class="${colorClass}"><b>${p.appId}</b>${isActive ? ' (ACTIVO)' : ''}</div>`;
+                        if (p.error) {
+                            html += `<div class="text-red-600">Error: ${p.error}</div>`;
+                        } else {
+                            html += `<div>users: ${p.users} | students: ${p.students}</div>`;
+                            if (hasData && !isActive) {
+                                html += `<button onclick="window.switchAppId('${p.appId}')" class="mt-1 bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-[10px] font-medium">Usar esta ruta</button>`;
+                            }
+                        }
+                        html += `</div>`;
+                    });
+                    html += `<button onclick="window.scanAndShowPaths()" class="mt-2 w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-1.5 rounded text-xs font-medium">Re-escanear</button>`;
+                }
 
                 if (errors.length > 0) {
                     html += `<div class="border-t pt-2 mt-2"><b>Ultimos errores (${errors.length}):</b></div>`;
@@ -1603,14 +1711,23 @@
                     html += `<div class="border-t pt-2 mt-2 text-green-600">Sin errores registrados.</div>`;
                 }
 
-                html += `<div class="border-t pt-2 mt-2 text-gray-500">Ruta: artifacts/${debug.appId}/public/data/pisaporte_*</div>`;
-                html += `<div class="text-gray-500">Si ves 0 docs en students pero ayer habia datos, probablemente las reglas de Firestore estan bloqueando la lectura. Revisa la consola Firebase.</div>`;
+                html += `<div class="border-t pt-2 mt-2 text-gray-500 text-[10px]">Ruta: artifacts/${currentAppId}/public/data/pisaporte_*</div>`;
+                html += `<div class="text-gray-500 text-[10px]">Si no ves datos aqui pero si en otra ruta, pulsa "Usar esta ruta" para cambiar.</div>`;
 
                 content.innerHTML = html;
                 panel.style.display = 'flex';
             } else {
                 panel.style.display = 'none';
             }
+        };
+
+        // Escanea rutas y refresca el panel
+        window.scanAndShowPaths = async () => {
+            showToast("Escaneando rutas alternativas...");
+            await window.scanOtherAppPaths();
+            // Forzar re-render del panel
+            document.getElementById('fb-debug-panel').style.display = 'none';
+            window.toggleFBDebug();
         };
 
     </script>
