@@ -1453,10 +1453,12 @@
             let course = document.getElementById('modal-student-course').value.trim();
 
             if (!name || !course) return showToast("Rellena nombre y grupo.");
-            
+
             course = formatGroupNameForFile(course); // Normaliza (Ej: 1º ESO A -> 1ºA)
 
-            if (allStudents.some(s => s.name === name && s.course === course)) {
+            // Comprobar duplicados normalizando tambien el curso del alumno existente
+            // (por si en la BD hay cursos sin normalizar como "1º A" en vez de "1ºA")
+            if (allStudents.some(s => s.name === name && formatGroupNameForFile(s.course) === course)) {
                 return showToast("El alumno ya existe en esa clase.");
             }
 
@@ -1950,7 +1952,8 @@
                             if (name) {
                                 name = String(name).trim().replace(/^["'](.+(?=["']$))["']$/, '$1');
                                 // Deteccion de duplicados: mismo (name, course) ya en BD o ya insertado en esta importacion
-                                const exists = allStudents.some(s => s.name === name && s.course === course);
+                                // Normalizamos s.course tambien por si hay datos legacy sin normalizar (ej: "1º A" vs "1ºA")
+                                const exists = allStudents.some(s => s.name === name && formatGroupNameForFile(s.course) === course);
                                 if (!exists) {
                                     try {
                                         await addDoc(collection(db, 'artifacts', activeAppId, 'public', 'data', 'pisaporte_students'), {
@@ -3287,10 +3290,25 @@
         }
         window.renderQRToCanvas = renderQRToCanvas;
 
+        // Normaliza el nombre de un grupo para que variantes como "1º A", "1ºA",
+        // "1°A", "1º ESO A", "1º a" se consideren el mismo grupo ("1º A").
+        // Mantiene UN espacio entre el numero+ordinal y la letra para mejor legibilidad.
+        // Se usa en importacion, almacenamiento, filtros y nombres de archivo.
         function formatGroupNameForFile(name) {
             if (name === "ALL") return "TodosGrupos";
             if (!name) return "";
-            return name.replace(/\bESO\b/gi, '').replace(/(\d+º?)\s+/g, '$1').replace(/\s+/g, '').trim();
+            return String(name)
+                .replace(/°/g, 'º')              // symbol degree → ordinal (° → º)
+                .replace(/\bESO\b/gi, '')        // quitar "ESO"
+                .replace(/\bBACH\b/gi, '')       // quitar "BACH"
+                .replace(/\bBACHILLERATO\b/gi, '') // quitar "BACHILLERATO"
+                .replace(/\bDIV\b/gi, '')        // quitar "DIV" (diversificacion)
+                .replace(/\s+/g, ' ')            // normalizar multiples espacios a uno solo
+                .trim()
+                .toUpperCase()                   // normalizar a mayusculas: "1ºa" → "1ºA"
+                // Asegurar UN espacio entre el numero+ordinal y la letra:
+                // "1ºA" → "1º A", "1º A" → "1º A", "2ºB" → "2º B"
+                .replace(/(\d+º)([A-Z])/g, '$1 $2');
         }
 
         // ================= IMPRESIÓN VÍA IFRAME (compatibilidad móvil) =================
