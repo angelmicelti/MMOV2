@@ -161,20 +161,50 @@
         .alert-lvl-3 { animation: pulse-level-3 0.5s infinite; }
         .alert-lvl-extreme { animation: pulse-level-extreme 0.25s infinite; }
         
-        /* Impresión de carnets y reportes */
+        /* Impresión de carnets y reportes - estrategia robusta para móvil y PC */
         @media print {
-            /* Ocultar todo menos el area de impresion */
-            body * { visibility: hidden; }
-            #print-area, #print-area * { visibility: visible; }
-            /* Posicionar el area de impresion al inicio del flujo */
-            #print-area {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-                display: block !important;
-                background: white;
+            /* Resetear el layout del body para que el #print-area fluya normalmente */
+            html, body {
+                position: static !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                height: auto !important;
+                min-height: 0 !important;
+                max-height: none !important;
+                overflow: visible !important;
+                background: white !important;
             }
+            /* Anular cualquier overflow:hidden/auto y height:100vh/h-screen
+               que puedan recortar el contenido en impresión móvil.
+               IMPORTANTE: excluir .qr-print-page y .qr-card (que necesitan
+               altura fija 281mm/54mm para el formato de carnets). */
+            body, main, header, nav, section, div:not(.qr-print-page):not(.qr-card) {
+                overflow: visible !important;
+                height: auto !important;
+                max-height: none !important;
+                flex: none !important;
+            }
+            /* Ocultar TODOS los hijos directos del body por defecto.
+               IMPORTANTE: usar display:none (no visibility:hidden) porque
+               visibility:hidden en móvil iOS Safari a veces no oculta del todo
+               y deja páginas en blanco fantasma. */
+            body > * { display: none !important; }
+            /* Mostrar SOLO el #print-area (y sus descendientes).
+               Forzar display:block con !important para vencer la clase 'hidden'
+               de Tailwind que tiene display:none. */
+            #print-area {
+                display: block !important;
+                position: static !important;
+                top: auto !important;
+                left: auto !important;
+                width: 100% !important;
+                height: auto !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: white !important;
+                overflow: visible !important;
+            }
+            #print-area.hidden { display: block !important; }
             .no-print { display: none !important; }
             /* Asegurar que los colores de fondo se impriman (QR) */
             * {
