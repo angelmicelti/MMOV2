@@ -161,52 +161,23 @@
         .alert-lvl-3 { animation: pulse-level-3 0.5s infinite; }
         .alert-lvl-extreme { animation: pulse-level-extreme 0.25s infinite; }
         
-        /* Impresión de carnets y reportes - estrategia robusta para móvil y PC */
+        /* Impresión de carnets y reportes
+           Estrategia: ocultar TODO el body con display:none y mostrar SOLO #print-area.
+           La función doPrint() clona el contenido en un iframe limpio para máxima
+           compatibilidad con móvil (iOS Safari y Chrome móvil). */
         @media print {
-            /* Resetear el layout del body para que el #print-area fluya normalmente */
-            html, body {
-                position: static !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                height: auto !important;
-                min-height: 0 !important;
-                max-height: none !important;
-                overflow: visible !important;
-                background: white !important;
-            }
-            /* Anular cualquier overflow:hidden/auto y height:100vh/h-screen
-               que puedan recortar el contenido en impresión móvil.
-               IMPORTANTE: excluir .qr-print-page y .qr-card (que necesitan
-               altura fija 281mm/54mm para el formato de carnets). */
-            body, main, header, nav, section, div:not(.qr-print-page):not(.qr-card) {
-                overflow: visible !important;
-                height: auto !important;
-                max-height: none !important;
-                flex: none !important;
-            }
-            /* Ocultar TODOS los hijos directos del body por defecto.
-               IMPORTANTE: usar display:none (no visibility:hidden) porque
-               visibility:hidden en móvil iOS Safari a veces no oculta del todo
-               y deja páginas en blanco fantasma. */
-            body > * { display: none !important; }
-            /* Mostrar SOLO el #print-area (y sus descendientes).
-               Forzar display:block con !important para vencer la clase 'hidden'
-               de Tailwind que tiene display:none. */
+            body * { visibility: hidden; }
+            #print-area, #print-area * { visibility: visible; }
             #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
                 display: block !important;
-                position: static !important;
-                top: auto !important;
-                left: auto !important;
-                width: 100% !important;
-                height: auto !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                background: white !important;
-                overflow: visible !important;
+                background: white;
             }
             #print-area.hidden { display: block !important; }
             .no-print { display: none !important; }
-            /* Asegurar que los colores de fondo se impriman (QR) */
             * {
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
@@ -2610,9 +2581,11 @@
                             }
                         }, 5000);
                         try {
-                            window.print();
+                            // Usar printViaIframe para compatibilidad con móvil
+                            printViaIframe();
                         } catch (e) {
-                            console.error('window.print() fallo:', e);
+                            console.error('printViaIframe fallo, intentando window.print:', e);
+                            try { window.print(); } catch(e2) {}
                             cleanupAfterPrint();
                         }
                     });
@@ -3148,9 +3121,11 @@
             }, 6000);
             setTimeout(() => {
                 try {
-                    window.print();
+                    // Usar printViaIframe para compatibilidad con móvil
+                    printViaIframe();
                 } catch (e) {
-                    console.error('window.print() fallo:', e);
+                    console.error('printViaIframe fallo, intentando window.print:', e);
+                    try { window.print(); } catch(e2) {}
                     cleanupReportAfterPrint();
                 }
             }, 500);
@@ -3230,6 +3205,116 @@
             if (!name) return "";
             return name.replace(/\bESO\b/gi, '').replace(/(\d+º?)\s+/g, '$1').replace(/\s+/g, '').trim();
         }
+
+        // ================= IMPRESIÓN VÍA IFRAME (compatibilidad móvil) =================
+        // Estrategia: clonar el contenido de #print-area en un iframe oculto, e imprimir
+        // ese iframe. Evita TODOS los problemas de layout del body principal en móvil
+        // (h-screen, overflow-y-auto, flex, position:absolute) que causaban PDFs en blanco.
+        // En PC también funciona correctamente.
+        function printViaIframe() {
+            const printArea = document.getElementById('print-area');
+            if (!printArea || !printArea.innerHTML.trim()) {
+                console.warn('printViaIframe: #print-area vacio');
+                return;
+            }
+
+            // Clonar el nodo #print-area para no modificar el original
+            const clone = printArea.cloneNode(true);
+            // Convertir TODOS los <canvas> del clon a <img> con su dataURL
+            // (los canvas no se serializan con innerHTML y se perderian en el iframe)
+            const originalCanvases = printArea.querySelectorAll('canvas');
+            const clonedCanvases = clone.querySelectorAll('canvas');
+            for (let i = 0; i < originalCanvases.length; i++) {
+                const orig = originalCanvases[i];
+                const clon = clonedCanvases[i];
+                try {
+                    const dataUrl = orig.toDataURL('image/png');
+                    const img = document.createElement('img');
+                    img.src = dataUrl;
+                    img.width = orig.width;
+                    img.height = orig.height;
+                    // Preservar estilos en linea del canvas
+                    if (orig.style.width) img.style.width = orig.style.width;
+                    if (orig.style.height) img.style.height = orig.style.height;
+                    img.style.display = 'block';
+                    img.style.margin = '0 auto';
+                    img.style.imageRendering = 'pixelated';
+                    clon.parentNode.replaceChild(img, clon);
+                } catch (e) {
+                    console.warn('No se pudo convertir canvas a img:', e);
+                }
+            }
+
+            // Crear iframe oculto
+            const iframe = document.createElement('iframe');
+            iframe.style.position = 'fixed';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = '0';
+            iframe.style.visibility = 'hidden';
+            document.body.appendChild(iframe);
+
+            const doc = iframe.contentWindow.document;
+            // Recoger todos los <style> del clon (incluye los de printReport/printQRCards)
+            const stylesHtml = clone.querySelectorAll('style');
+            let stylesStr = '';
+            stylesHtml.forEach(s => { stylesStr += s.outerHTML; });
+            // Qitar los <style> del clon para que no se dupliquen en el body
+            stylesHtml.forEach(s => s.remove());
+
+            // Construir documento HTML completo del iframe
+            doc.open();
+            doc.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Impresión Pisaporte V2</title>
+${stylesStr}
+<style>
+    /* Estilos base para el documento de impresión */
+    html, body {
+        margin: 0;
+        padding: 0;
+        background: white;
+        color: #1f2937;
+        font-family: sans-serif;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    body { display: block; }
+</style>
+</head>
+<body>${clone.innerHTML}</body>
+</html>`);
+            doc.close();
+
+            // Esperar a que el iframe cargue (cierre y cargas de imágenes/canvas)
+            const doPrint = () => {
+                try {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                } catch (e) {
+                    console.error('printViaIframe: error al imprimir:', e);
+                }
+                // Eliminar el iframe tras un delay (deja tiempo al dialogo de impresion)
+                setTimeout(() => {
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                }, 1000);
+            };
+
+            // Esperar a que imagenes y canvas esten listos
+            if (iframe.contentWindow.document.readyState === 'complete') {
+                setTimeout(doPrint, 300);
+            } else {
+                iframe.onload = () => setTimeout(doPrint, 300);
+                // Fallback por si onload no dispara
+                setTimeout(doPrint, 1500);
+            }
+        }
+        window.printViaIframe = printViaIframe;
 
         function getLocalTodayString() {
             const tzoffset = (new Date()).getTimezoneOffset() * 60000;
