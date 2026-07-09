@@ -2485,13 +2485,14 @@
                 }
                 /* Cada .qr-print-page es UNA pagina fisica A4.
                    Altura fija = 281mm (A4 297mm - 2*8mm margen) para que el
-                   centrado vertical funcione y el salto de pagina sea exacto. */
+                   centrado vertical funcione y el salto de pagina sea exacto.
+                   Separacion entre tarjetas: 15mm (1.5cm) en horizontal y vertical. */
                 .qr-print-page {
                     display: flex;
                     flex-wrap: wrap;
                     width: 100%;
                     height: 281mm;
-                    gap: 6mm;
+                    gap: 15mm;
                     align-items: center;
                     align-content: center;
                     justify-content: center;
